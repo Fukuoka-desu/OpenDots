@@ -110,6 +110,15 @@ const actions: Record<
 };
 const dockKinds: ActionKind[] = ['code', 'mail', 'browser', 'memo', 'calendar'];
 
+const toolLabels: Record<string, string> = {
+  gmail_search_messages: 'メールを検索',
+  gmail_read_message: 'メールを読み込み',
+  gmail_create_draft: '下書きを作成',
+  gmail_send_draft: 'メールを送信',
+  calendar_list_events: '予定を確認',
+  calendar_create_event: '予定を追加',
+};
+
 type Demo = { label: string; prompt: string; needs?: 'mail' };
 const demos: Demo[] = [
   {
@@ -665,7 +674,9 @@ function StageRoom({
                         const kind = kindOf(call.function.name);
                         const status = callState(call);
                         const base =
-                          actions[kind].base || `${call.function.name} を実行`;
+                          toolLabels[call.function.name] ||
+                          actions[kind].base ||
+                          `${call.function.name} を実行`;
                         const sent = call.function.name === 'gmail_send_draft';
                         return (
                           <li key={call.id} className={status}>
@@ -675,9 +686,7 @@ function StageRoom({
                             <span>
                               <strong>
                                 {status === 'done'
-                                  ? sent
-                                    ? 'メールを送信しました'
-                                    : `${base}しました`
+                                  ? `${base}しました`
                                   : status === 'busy'
                                     ? `${base}中…`
                                     : `${base}（中断）`}
