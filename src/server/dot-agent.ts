@@ -24,6 +24,7 @@ import { CalendarClient, calendarTools } from './calendar.js';
 import { GmailClient, gmailTools } from './gmail.js';
 import { sharedGoogleAuth } from './google-auth.js';
 import { tokenCost } from './usage.js';
+import { voiceComputeRequest } from '../shared/voice-compute.js';
 import {
   chooseModel,
   Judge,
@@ -318,15 +319,18 @@ export class DotAgent extends AbstractAgent {
           factory: async (ctx) => {
             check();
             const request = latestUserText(ctx.input.messages);
-            const model = await chooseModel(
-              judge,
-              request,
-              {
-                model: this.config.model!,
-                heavyModel: this.config.heavyModel,
-              },
-              ctx.abortController.signal,
-            );
+            const model =
+              voiceComputeRequest(request) !== undefined
+                ? this.config.model!
+                : await chooseModel(
+                    judge,
+                    request,
+                    {
+                      model: this.config.model!,
+                      heavyModel: this.config.heavyModel,
+                    },
+                    ctx.abortController.signal,
+                  );
             const adapter = openaiCompatibleText(model, {
               apiKey: this.config.apiKey!,
               baseURL: this.config.baseUrl ?? 'https://api.openai.com/v1',

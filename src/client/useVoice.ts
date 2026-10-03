@@ -4,6 +4,7 @@ import { connectElevenLabs } from './voice/elevenlabs';
 import { connectGemini } from './voice/gemini';
 import { connectLiveAvatar } from './voice/liveavatar';
 import { connectOpenAI } from './voice/openai';
+import type { VoiceComputeProgress } from '../shared/voice-compute';
 import type {
   VoiceCallbacks,
   VoiceCallResponse,
@@ -18,6 +19,8 @@ type VoiceCallSession = {
   timer?: ReturnType<typeof setTimeout>;
   cancelled: boolean;
   abort: AbortController;
+  computePollers: Set<() => void>;
+  computePollInFlight: boolean;
   transport?: VoiceTransportSession;
 };
 
@@ -50,6 +53,8 @@ export function useVoice(
       request?: string;
     }[]
   >([]);
+  const [computing, setComputing] = useState<VoiceComputeProgress>();
+  const computingToolCallId = useRef<string | undefined>(undefined);
   const session = useRef<VoiceCallSession | undefined>(undefined);
   const video = useRef<HTMLVideoElement | null>(null);
   const [avatarReady, setAvatarReady] = useState(false);
@@ -63,6 +68,7 @@ export function useVoice(
     const current = session.current;
     if (!current) return;
     current.cancelled = true;
+    [...current.computePollers].forEach((stop) => stop());
     current.abort.abort();
     current.stream.getTracks().forEach((track) => track.stop());
     void current.transport?.close();
@@ -78,6 +84,7 @@ export function useVoice(
       return;
     }
     current.cancelled = true;
+    [...current.computePollers].forEach((stop) => stop());
     current.transport?.setMicMuted(true);
     current.transport?.setSpeakerMuted(true);
     if (!current.transport) current.abort.abort();
@@ -157,6 +164,8 @@ export function useVoice(
     setUserCaption('');
     setAvatarReady(false);
     setTurns([]);
+    setComputing(undefined);
+    computingToolCallId.current = undefined;
     let stream: MediaStream | undefined;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -175,6 +184,8 @@ export function useVoice(
         transcript: [],
         cancelled: false,
         abort: new AbortController(),
+        computePollers: new Set(),
+        computePollInFlight: false,
       };
       session.current = current;
       const callbacks: VoiceCallbacks = {
@@ -216,20 +227,70 @@ export function useVoice(
         },
         compute: async (toolCallId, request) => {
           if (!current.id) throw new Error('Call is not ready for compute.');
-          const result = await api<{ text: string }>(
-            `/voice/calls/${current.id}/compute`,
-            'POST',
-            {
-              toolCallId,
-              request,
-              transcript: current.transcript.join('\n').slice(-12000),
-            },
-          );
-          setTurns((list) => [
-            ...list,
-            { id: list.length, role: 'result', text: result.text, request },
-          ]);
-          return result.text;
+          const callId = current.id;
+          computingToolCallId.current = toolCallId;
+          setComputing(undefined);
+          let active = true;
+          const poll = async () => {
+            if (
+              !active ||
+              current.computePollInFlight ||
+              current.cancelled ||
+              session.current !== current ||
+              !current.id
+            )
+              return;
+            current.computePollInFlight = true;
+            try {
+              const result = await api<{ items: VoiceComputeProgress[] }>(
+                `/voice/calls/${current.id}/progress`,
+              );
+              if (
+                active &&
+                !current.cancelled &&
+                session.current === current &&
+                computingToolCallId.current === toolCallId
+              )
+                setComputing(
+                  result.items.find((item) => item.toolCallId === toolCallId),
+                );
+            } catch {
+              return;
+            } finally {
+              current.computePollInFlight = false;
+            }
+          };
+          const timer = setInterval(() => void poll(), 1000);
+          const stop = () => {
+            if (!active) return;
+            active = false;
+            clearInterval(timer);
+            current.computePollers.delete(stop);
+            if (computingToolCallId.current === toolCallId) {
+              computingToolCallId.current = undefined;
+              setComputing(undefined);
+            }
+          };
+          current.computePollers.add(stop);
+          void poll();
+          try {
+            const result = await api<{ text: string }>(
+              `/voice/calls/${callId}/compute`,
+              'POST',
+              {
+                toolCallId,
+                request,
+                transcript: current.transcript.join('\n').slice(-12000),
+              },
+            );
+            setTurns((list) => [
+              ...list,
+              { id: list.length, role: 'result', text: result.text, request },
+            ]);
+            return result.text;
+          } finally {
+            stop();
+          }
         },
       };
       let usesAvatar = false;
@@ -328,6 +389,7 @@ export function useVoice(
     caption,
     userCaption,
     turns,
+    computing,
     toggleMute,
     toggleSpeaker,
     getLevels,

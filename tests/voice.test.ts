@@ -3,6 +3,7 @@ import { Store } from '../src/server/store.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
 import { VoiceService, voiceGreeting } from '../src/server/voice.js';
 import type { PlatformConfig } from '../src/server/platform-config.js';
+import type { ThreadTurnProgress } from '../src/server/headless.js';
 const resources: (() => void)[] = [];
 afterEach(() => {
   resources.splice(0).forEach((close) => close());
@@ -26,8 +27,13 @@ function fixture(configOverrides: Partial<PlatformConfig> = {}) {
     ...configOverrides,
   };
   const turn = vi.fn(
-    async (_thread: string, _prompt: string, _signal: AbortSignal) =>
-      'Current answer',
+    async (
+      _thread: string,
+      _prompt: string,
+      _signal: AbortSignal,
+      _metadata?: Record<string, unknown>,
+      _onProgress?: (step: ThreadTurnProgress) => void,
+    ) => 'Current answer',
   );
   const history = vi.fn(async () => 'user: Earlier topic');
   const transport = vi.fn<typeof fetch>(async (url) =>
@@ -151,6 +157,48 @@ it('binds voice history and compute to the existing thread, deduplicates tools a
     'ended',
   );
 });
+
+it('tracks voice compute steps and deduplicates progress by tool call ID', async () => {
+  const f = fixture();
+  const call = await f.voice.begin(
+    'thread',
+    offer,
+    new AbortController().signal,
+  );
+  f.voice.activate(call.id);
+  f.turn.mockImplementation(
+    async (_thread, _prompt, _signal, _metadata, onProgress) => {
+      onProgress?.({ tool: 'search_web', args: { search_queries: ['q'] } });
+      onProgress?.({ writing: true });
+      return 'ok';
+    },
+  );
+
+  await expect(
+    f.voice.compute(call.id, 'progress-call', 'Research q'),
+  ).resolves.toBe('ok');
+  const [progress] = f.voice.progress(call.id);
+  expect(progress?.steps.map((step) => step.label)).toEqual([
+    '依頼を確認',
+    'ウェブ検索',
+    '結果をまとめています',
+  ]);
+  expect(progress?.done).toBe(true);
+  expect(progress).toMatchObject({
+    toolCallId: 'progress-call',
+    request: 'Research q',
+    steps: [
+      { label: '依頼を確認' },
+      { label: 'ウェブ検索', detail: 'q', tool: 'search_web' },
+      { label: '結果をまとめています' },
+    ],
+  });
+  await expect(
+    f.voice.compute(call.id, 'progress-call', 'Research q'),
+  ).resolves.toBe('ok');
+  expect(f.voice.progress(call.id)).toHaveLength(1);
+  await f.voice.end(call.id, '');
+});
 it('declines forbidden voice compute requests without calling the specialist', async () => {
   const f = fixture({ judgeKey: 'judge-secret' });
   f.transport.mockImplementation(async (url) =>
@@ -239,6 +287,8 @@ it('runs allowed voice compute once with the unchanged request and transcript pr
     'thread',
     prompt,
     expect.any(AbortSignal),
+    undefined,
+    expect.any(Function),
   );
   expect(
     f.transport.mock.calls.filter(

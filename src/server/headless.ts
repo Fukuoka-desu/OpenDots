@@ -4,6 +4,12 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { voiceReceiptMessagePrefix } from '../shared/voice-receipt.js';
 
+export type ThreadTurnProgress = {
+  tool?: string;
+  args?: Record<string, unknown>;
+  writing?: boolean;
+};
+
 export function currentTurnText(messages: Message[], error?: Error): string {
   if (error) throw error;
   const content = messages
@@ -28,6 +34,7 @@ export async function runThreadTurn(
   prompt: string,
   signal: AbortSignal,
   metadata?: Record<string, unknown>,
+  onProgress?: (step: ThreadTurnProgress) => void,
 ): Promise<string> {
   signal.throwIfAborted();
   const response = await fetch(`${runtimeUrl}/info`, { headers, signal });
@@ -52,6 +59,20 @@ export async function runThreadTurn(
   agent.threadId = threadId;
   let runError: Error | undefined;
   const subscription = agent.subscribe({
+    onToolCallEndEvent: ({ toolCallName, toolCallArgs }) => {
+      try {
+        onProgress?.({ tool: toolCallName, args: toolCallArgs });
+      } catch {
+        return;
+      }
+    },
+    onTextMessageStartEvent: () => {
+      try {
+        onProgress?.({ writing: true });
+      } catch {
+        return;
+      }
+    },
     onRunErrorEvent: ({ event }) => {
       runError = new Error(event.message);
     },

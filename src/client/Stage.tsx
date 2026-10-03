@@ -17,6 +17,7 @@ import {
   Brain,
   CalendarClock,
   CalendarDays,
+  Check,
   CircleCheck,
   Database,
   FileText,
@@ -30,6 +31,7 @@ import {
   Phone,
   PhoneOff,
   Plus,
+  Search,
   SendHorizontal,
   Settings,
   SquareCheck,
@@ -58,7 +60,10 @@ import type {
   SetupStatus,
   WorkspaceState,
 } from '../shared/types';
-import { voiceComputeRequest } from '../shared/voice-compute';
+import {
+  voiceComputeRequest,
+  type VoiceComputeStep,
+} from '../shared/voice-compute';
 import './stage.css';
 
 const dotKey = 'opendots-stage-dot';
@@ -386,6 +391,35 @@ function Bars({ count, className }: { count: number; className: string }) {
   );
 }
 
+function ResearchSteps({ steps }: { steps: VoiceComputeStep[] }) {
+  const recent = steps.slice(-4);
+  return (
+    <ol className="sec-research-steps">
+      {recent.map((step, index) => {
+        const current = index === recent.length - 1;
+        return (
+          <li
+            key={`${step.at}-${index}`}
+            className={current ? 'current' : 'complete'}
+          >
+            {current ? (
+              <span className="sec-research-dot" aria-hidden />
+            ) : (
+              <Check size={14} aria-hidden />
+            )}
+            <span className="sec-research-step-copy">
+              <strong>{step.label}</strong>
+              {step.detail && (
+                <span className="sec-research-detail">「{step.detail}」</span>
+              )}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 function StageRoom({
   dot,
   dots,
@@ -409,6 +443,7 @@ function StageRoom({
   const { copilotkit } = useCopilotKit();
   const [loaded, setLoaded] = useState(false);
   const [running, setRunning] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const [reportState, setReportState] = useState<ReportState>();
   const [reportsReady, setReportsReady] = useState(false);
   const [toast, setToast] = useState<{
@@ -432,6 +467,16 @@ function StageRoom({
     setup.voiceProvider,
     agent.messages.at(-1)?.id,
   );
+  const ticking = running || voice.computing !== undefined;
+  useEffect(() => {
+    if (!ticking) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [ticking]);
+  const researchSeconds = voice.computing
+    ? Math.max(0, Math.floor((now - voice.computing.startedAt) / 1000))
+    : 0;
   useLevelVars(root, voice.getLevels);
   const keyCanvas = useRef<HTMLCanvasElement>(null);
   const sourceVideo = useRef<HTMLVideoElement | null>(null);
@@ -523,6 +568,8 @@ function StageRoom({
   const callState = (call: ToolCall) =>
     finished.has(call.id) ? 'done' : working ? 'busy' : 'stopped';
   const dockState = (kind: ActionKind) => {
+    const progressTool = voice.computing?.steps.at(-1)?.tool;
+    if (progressTool && kindOf(progressTool) === kind) return 'busy';
     const mine = calls.filter((call) => kindOf(call.function.name) === kind);
     if (mine.some((call) => callState(call) === 'busy')) return 'busy';
     return mine.length && callState(mine.at(-1)!) === 'done' ? 'done' : 'idle';
@@ -733,6 +780,15 @@ function StageRoom({
         aria-label="トレタン"
       >
         <VoiceWave phase={phase} getLevels={voice.getLevels} />
+        {voice.computing && (
+          <div className="sec-research" role="status">
+            <div className="sec-research-head">
+              <Search className="sec-research-spinner" size={16} aria-hidden />
+              <strong>調べています · {researchSeconds}秒</strong>
+            </div>
+            <ResearchSteps steps={voice.computing.steps} />
+          </div>
+        )}
         {toast && (
           <div className="sec-toast" role="status" key={toast.id}>
             <span>
@@ -1014,23 +1070,39 @@ function StageRoom({
               </div>
             ),
           )}
-          {(running || (live && voice.phase === 'thinking')) && (
-            <div className="sec-msg ai pending">
-              <span className="sec-ai-icon">
-                <AudioLines size={16} />
-              </span>
-              <div>
-                <p className="sec-typing">
-                  <Bars count={6} className="sec-mini-wave" />
-                  <span className="sec-dots">
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                </p>
+          {(running ||
+            (live && voice.phase === 'thinking') ||
+            voice.computing) &&
+            (voice.computing ? (
+              <div className="sec-msg ai pending">
+                <span className="sec-ai-icon">
+                  <AudioLines size={16} />
+                </span>
+                <div>
+                  <p className="sec-meta">トレタン</p>
+                  <div className="sec-bubble sec-research-chat">
+                    <p>調べています（{researchSeconds}秒）</p>
+                    <ResearchSteps steps={voice.computing.steps} />
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="sec-msg ai pending">
+                <span className="sec-ai-icon">
+                  <AudioLines size={16} />
+                </span>
+                <div>
+                  <p className="sec-typing">
+                    <Bars count={6} className="sec-mini-wave" />
+                    <span className="sec-dots">
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                  </p>
+                </div>
+              </div>
+            ))}
           <div ref={bottom} />
         </div>
         {(error || voice.error) && (

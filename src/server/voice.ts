@@ -2,7 +2,11 @@ import type { Platform } from './platform.js';
 import { Judge } from './judge.js';
 import { CalendarClient } from './calendar.js';
 import { sharedGoogleAuth } from './google-auth.js';
-import { voiceComputeMarker } from '../shared/voice-compute.js';
+import {
+  computeStepLabel,
+  voiceComputeMarker,
+  type VoiceComputeProgress,
+} from '../shared/voice-compute.js';
 
 export function voiceInstructions(
   dot: { name: string; instructions: string },
@@ -132,6 +136,7 @@ export class VoiceService {
     {
       controller: AbortController;
       calls: Map<string, Promise<string>>;
+      progress: Map<string, VoiceComputeProgress>;
       deadline: ReturnType<typeof setTimeout>;
       providerId?: string;
     }
@@ -185,7 +190,12 @@ export class VoiceService {
       void this.expire(call.id, 'Call connection expired before activation.');
     }, 30_000);
     deadline.unref();
-    this.jobs.set(call.id, { controller, calls: new Map(), deadline });
+    this.jobs.set(call.id, {
+      controller,
+      calls: new Map(),
+      progress: new Map(),
+      deadline,
+    });
     const timeout = AbortSignal.timeout(20_000);
     const dot = this.platform.workspace.dot(
       this.platform.workspace.requireThread(threadId).dotId,
@@ -488,6 +498,10 @@ export class VoiceService {
     job.deadline.unref();
     return this.platform.workspace.setCall(id, 'active', '');
   }
+  progress(id: string): VoiceComputeProgress[] {
+    this.requireCall(id);
+    return [...(this.jobs.get(id)?.progress.values() ?? [])];
+  }
   async compute(
     id: string,
     toolCallId: string,
@@ -504,30 +518,66 @@ export class VoiceService {
         'This call reached its six compute-turn limit. Start another call to continue.',
       );
     const prompt = `${request}${voiceComputeMarker}${transcript}`;
-    const pending = (async () => {
-      if (this.judge.configured) {
-        const answers = await this.judge.ask(
-          request,
-          {
-            forbidden: {
-              type: 'noul',
-              instructions:
-                "The request asks the assistant to send a message to someone, make a purchase or payment, change account permissions, delete data, or operate the user's own device.",
-            },
-          },
-          job.controller.signal,
-        );
-        if (
-          answers?.forbidden.type === 'noul' &&
-          answers.forbidden.noul >= 0.85
-        )
-          return 'Declined by the call guardrail: from a voice call I can research and reason, but I cannot send messages, make purchases, change permissions, delete data, or operate your device. Ask in the Dot chat instead.';
+    const progress: VoiceComputeProgress = {
+      toolCallId,
+      request,
+      startedAt: Date.now(),
+      steps: [{ label: '依頼を確認', at: Date.now() }],
+      done: false,
+    };
+    job.progress.set(toolCallId, progress);
+    const onProgress = (step: {
+      tool?: string;
+      args?: Record<string, unknown>;
+      writing?: boolean;
+    }) => {
+      if (step.tool) {
+        progress.steps.push({
+          ...computeStepLabel(step.tool, step.args ?? {}),
+          tool: step.tool,
+          at: Date.now(),
+        });
+      } else if (
+        step.writing &&
+        progress.steps.some((item) => item.tool) &&
+        progress.steps.at(-1)?.label !== '結果をまとめています'
+      ) {
+        progress.steps.push({
+          label: '結果をまとめています',
+          at: Date.now(),
+        });
       }
-      return this.platform.turn(
-        call.threadId,
-        prompt,
-        AbortSignal.any([job.controller.signal, AbortSignal.timeout(90_000)]),
-      );
+    };
+    const pending = (async () => {
+      try {
+        if (this.judge.configured) {
+          const answers = await this.judge.ask(
+            request,
+            {
+              forbidden: {
+                type: 'noul',
+                instructions:
+                  "The request asks the assistant to send a message to someone, make a purchase or payment, change account permissions, delete data, or operate the user's own device.",
+              },
+            },
+            job.controller.signal,
+          );
+          if (
+            answers?.forbidden.type === 'noul' &&
+            answers.forbidden.noul >= 0.85
+          )
+            return 'Declined by the call guardrail: from a voice call I can research and reason, but I cannot send messages, make purchases, change permissions, delete data, or operate your device. Ask in the Dot chat instead.';
+        }
+        return await this.platform.turn(
+          call.threadId,
+          prompt,
+          AbortSignal.any([job.controller.signal, AbortSignal.timeout(90_000)]),
+          undefined,
+          onProgress,
+        );
+      } finally {
+        progress.done = true;
+      }
     })();
     job.calls.set(toolCallId, pending);
     return pending;
