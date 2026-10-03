@@ -5,6 +5,7 @@ export type GoogleAuthConfig = {
 };
 
 const oauthTokenUrl = 'https://oauth2.googleapis.com/token';
+const sharedGoogleAuthInstances = new Map<string, GoogleAuth>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -115,4 +116,14 @@ export class GoogleAuth {
         : 'Google API';
     return (await this.responseJson(response, service)) as T;
   }
+}
+
+export function sharedGoogleAuth(config: GoogleAuthConfig) {
+  const key = `${config.clientId}\0${config.refreshToken}`;
+  let auth = sharedGoogleAuthInstances.get(key);
+  if (!auth) {
+    auth = new GoogleAuth(config);
+    sharedGoogleAuthInstances.set(key, auth);
+  }
+  return auth;
 }

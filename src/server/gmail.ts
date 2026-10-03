@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { GoogleAuth, type GoogleAuthConfig } from './google-auth.js';
 
 const gmailApiUrl = 'https://gmail.googleapis.com/gmail/v1/users/me';
+const emailAddresses = new WeakMap<GoogleAuth, Promise<string>>();
 
 type GmailMessage = {
   id: string;
@@ -113,6 +114,25 @@ export class GmailClient {
 
   get configured() {
     return this.auth.configured;
+  }
+
+  async emailAddress() {
+    const cached = emailAddresses.get(this.auth);
+    if (cached) return cached;
+
+    const request = this.api('/profile').then((profile) => {
+      if (typeof profile.emailAddress !== 'string' || !profile.emailAddress)
+        throw new Error('Gmail profile did not return an email address.');
+      return profile.emailAddress;
+    });
+    emailAddresses.set(this.auth, request);
+    try {
+      return await request;
+    } catch (error) {
+      if (emailAddresses.get(this.auth) === request)
+        emailAddresses.delete(this.auth);
+      throw error;
+    }
   }
 
   private async api(

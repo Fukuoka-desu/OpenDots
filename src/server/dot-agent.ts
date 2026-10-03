@@ -22,7 +22,7 @@ import type { PlatformConfig } from './platform-config.js';
 import { browserResponse } from './research.js';
 import { CalendarClient, calendarTools } from './calendar.js';
 import { GmailClient, gmailTools } from './gmail.js';
-import { GoogleAuth } from './google-auth.js';
+import { sharedGoogleAuth } from './google-auth.js';
 import {
   chooseModel,
   Judge,
@@ -123,7 +123,7 @@ export class DotAgent extends AbstractAgent {
           this.config,
           () => this.store.settings().paused,
         );
-        const googleAuth = new GoogleAuth({
+        const googleAuth = sharedGoogleAuth({
           clientId: this.config.gmailClientId,
           clientSecret: this.config.gmailClientSecret,
           refreshToken: this.config.gmailRefreshToken,
@@ -326,11 +326,22 @@ export class DotAgent extends AbstractAgent {
                   message.role !== 'system' && message.role !== 'developer',
               ),
             });
+            let ownerGmailAddress: string | undefined;
+            if (gmail.configured) {
+              try {
+                ownerGmailAddress = await gmail.emailAddress();
+              } catch {
+                ownerGmailAddress = undefined;
+              }
+            }
+            const ownerGmailInstruction = ownerGmailAddress
+              ? ` The owner's own Gmail address is ${ownerGmailAddress}; use it when the user asks to send or draft something to themselves (自分宛て).`
+              : '';
             return chat({
               adapter,
               messages: converted.messages,
               systemPrompts: [
-                promptWithCalendarAndTime,
+                `${promptWithCalendarAndTime}${ownerGmailInstruction}`,
                 ...converted.systemPrompts,
                 ...(ctx.learnedSkills.catalog
                   ? [ctx.learnedSkills.catalog]
