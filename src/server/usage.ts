@@ -255,11 +255,27 @@ async function syncElevenLabsUsageNow(
         if (eventAt === undefined || eventAt < cutoff) continue;
         const llmPrice = numberValue(charging.llm_price) ?? 0;
         const platformPrice = numberValue(charging.platform_price) ?? 0;
-        const llmModel = stringValue(
-          llmUsage.model,
-          llmUsage.model_id,
-          charging.llm_model,
-        );
+        const modelUsage = isRecord(llmUsage.model_usage)
+          ? llmUsage.model_usage
+          : isRecord(llmUsage.modelUsage)
+            ? llmUsage.modelUsage
+            : llmUsage;
+        const llmModel =
+          stringValue(llmUsage.model, llmUsage.model_id, charging.llm_model) ??
+          Object.keys(modelUsage).find(
+            (key) =>
+              ![
+                'input',
+                'output',
+                'total',
+                'tokens',
+                'usage',
+                'model',
+                'model_id',
+                'model_usage',
+                'modelUsage',
+              ].includes(key),
+          );
         store.addUsage({
           at: eventAt,
           service: 'elevenlabs',

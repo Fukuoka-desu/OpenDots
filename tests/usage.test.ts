@@ -158,7 +158,7 @@ describe('usage cost tracking', () => {
             charging: {
               llm_price: 0.01562229,
               platform_price: 0.03304407,
-              llm_usage: { model: 'gpt-4.1-mini' },
+              llm_usage: { 'gpt-4.1-mini': { input: {}, output: {} } },
               tts_usage: { primary_tts_model: 'eleven_turbo_v2_5' },
             },
           },
