@@ -15,6 +15,7 @@ import {
   AudioLines,
   BookOpen,
   Brain,
+  CalendarClock,
   CalendarDays,
   CircleCheck,
   Database,
@@ -44,6 +45,13 @@ import { isInternalVoiceReceipt } from './ChatTranscript';
 import { useVoice } from './useVoice';
 import { startChromaKey } from './chromaKey';
 import { VoiceWave } from './VoiceWave';
+import {
+  dueReport,
+  jstDay,
+  reportMarker,
+  reportSlots,
+  slotForNow,
+} from './reports';
 import type {
   Conversation,
   Dot,
@@ -59,6 +67,35 @@ const clock = new Intl.DateTimeFormat('ja-JP', {
   hour: '2-digit',
   minute: '2-digit',
 });
+const tokyoClock = new Intl.DateTimeFormat('ja-JP', {
+  timeZone: 'Asia/Tokyo',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+const reportsKey = 'toretan.reports.v1';
+const remindedKey = 'toretan.reminded.v1';
+
+type ReportState = { enabled: boolean; day: string; done: string[] };
+type ReminderState = { day: string; ids: string[] };
+type UpcomingEvent = { id: string; summary: string; start: string };
+
+function storedValue(key: string): unknown {
+  try {
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveValue(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    return;
+  }
+}
 
 type ActionKind =
   'code' | 'calendar' | 'mail' | 'browser' | 'crm' | 'memo' | 'other';
@@ -371,6 +408,17 @@ function StageRoom({
   const { copilotkit } = useCopilotKit();
   const [loaded, setLoaded] = useState(false);
   const [running, setRunning] = useState(false);
+  const [reportState, setReportState] = useState<ReportState>();
+  const [reportsReady, setReportsReady] = useState(false);
+  const [toast, setToast] = useState<{
+    id: string;
+    summary: string;
+    time: string;
+    minutes: number;
+  }>();
+  const [remindersReady, setRemindersReady] = useState(false);
+  const reminded = useRef<ReminderState>({ day: '', ids: [] });
+  const sendRef = useRef<(preset?: string) => Promise<void>>(async () => {});
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const root = useRef<HTMLDivElement>(null);
@@ -421,6 +469,45 @@ function StageRoom({
       active = false;
     };
   }, [agent, copilotkit, isReady]);
+  useEffect(() => {
+    const day = jstDay(new Date());
+    const value = storedValue(reportsKey);
+    const saved =
+      value && typeof value === 'object'
+        ? (value as Partial<ReportState>)
+        : undefined;
+    setReportState({
+      enabled: typeof saved?.enabled === 'boolean' ? saved.enabled : true,
+      day,
+      done:
+        saved?.day === day && Array.isArray(saved.done)
+          ? saved.done.filter((id): id is string => typeof id === 'string')
+          : [],
+    });
+    setReportsReady(true);
+  }, []);
+  useEffect(() => {
+    if (!reportsReady || !reportState) return;
+    saveValue(reportsKey, reportState);
+  }, [reportState, reportsReady]);
+  useEffect(() => {
+    const day = jstDay(new Date());
+    const value = storedValue(remindedKey);
+    const saved =
+      value && typeof value === 'object'
+        ? (value as Partial<ReminderState>)
+        : undefined;
+    const state: ReminderState = {
+      day,
+      ids:
+        saved?.day === day && Array.isArray(saved.ids)
+          ? saved.ids.filter((id): id is string => typeof id === 'string')
+          : [],
+    };
+    reminded.current = state;
+    if (saved?.day !== day) saveValue(remindedKey, state);
+    setRemindersReady(true);
+  }, []);
 
   const finished = new Set(
     agent.messages.flatMap((item) =>
@@ -470,6 +557,101 @@ function StageRoom({
       setRunning(false);
     }
   };
+  useEffect(() => {
+    sendRef.current = send;
+  }, [send]);
+  useEffect(() => {
+    if (!loaded || !reportsReady || !reportState) return;
+    const check = () => {
+      const now = new Date();
+      const day = jstDay(now);
+      const current =
+        reportState.day === day
+          ? reportState
+          : { ...reportState, day, done: [] };
+      if (current !== reportState) setReportState(current);
+      if (!current.enabled || running || voice.status !== 'idle') return;
+      const due = dueReport(now, current.done);
+      if (!due) return;
+      setReportState({
+        ...current,
+        done: [...new Set([...current.done, ...due.handled])],
+      });
+      if (due.slot) void sendRef.current(due.slot.prompt);
+    };
+    check();
+    const interval = setInterval(check, 30_000);
+    return () => clearInterval(interval);
+  }, [loaded, reportState, reportsReady, running, voice.status]);
+  useEffect(() => {
+    if (!setup.mail || !remindersReady) return;
+    let active = true;
+    let checking = false;
+    const check = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        let day = jstDay(new Date());
+        let current = reminded.current;
+        if (current.day !== day) {
+          current = { day, ids: [] };
+          reminded.current = current;
+          saveValue(remindedKey, current);
+        }
+        const { events } = await api<{ events: UpcomingEvent[] }>(
+          '/calendar/upcoming?minutes=15',
+        );
+        if (!active) return;
+        const now = new Date();
+        day = jstDay(now);
+        current = reminded.current;
+        if (current.day !== day) {
+          current = { day, ids: [] };
+          reminded.current = current;
+          saveValue(remindedKey, current);
+        }
+        const candidate = events
+          .filter((event) => {
+            if (!event.id || !/^\d{4}-\d{2}-\d{2}T/.test(event.start))
+              return false;
+            const start = Date.parse(event.start);
+            const remaining = start - now.getTime();
+            return (
+              Number.isFinite(start) &&
+              remaining > 0 &&
+              remaining <= 10 * 60_000 &&
+              !current.ids.includes(event.id)
+            );
+          })
+          .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
+          .at(-1);
+        if (!candidate) return;
+        const start = Date.parse(candidate.start);
+        const updated = {
+          day,
+          ids: [...current.ids, candidate.id],
+        };
+        reminded.current = updated;
+        saveValue(remindedKey, updated);
+        setToast({
+          id: candidate.id,
+          summary: candidate.summary,
+          time: tokyoClock.format(new Date(start)),
+          minutes: Math.ceil((start - now.getTime()) / 60_000),
+        });
+      } catch {
+        return;
+      } finally {
+        checking = false;
+      }
+    };
+    void check();
+    const interval = setInterval(() => void check(), 60_000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [remindersReady, setup.mail]);
   const phase: LiveDotPhase =
     voice.status === 'connecting'
       ? 'connecting'
@@ -483,8 +665,12 @@ function StageRoom({
     connecting: 'つないでいます…',
     listening: voice.muted ? 'ミュート中' : '聞いています…',
     thinking: '考えています…',
-    speaking: 'AIが話しています…',
+    speaking: 'トレタンが話しています…',
   }[phase];
+  const reportDone =
+    reportState?.day === jstDay(new Date()) ? reportState.done : [];
+  const nextReport = reportSlots.find((slot) => !reportDone.includes(slot.id));
+  const reportEnabled = reportState?.enabled ?? true;
   const voiceName =
     setup.voiceProvider === 'elevenlabs'
       ? 'ElevenLabs'
@@ -521,6 +707,21 @@ function StageRoom({
         aria-label="トレタン"
       >
         <VoiceWave phase={phase} getLevels={voice.getLevels} />
+        {toast && (
+          <div className="sec-toast" role="status" key={toast.id}>
+            <span>
+              まもなく予定：{toast.time}「{toast.summary}」（あと{toast.minutes}
+              分）
+            </span>
+            <button
+              type="button"
+              aria-label="閉じる"
+              onClick={() => setToast(undefined)}
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <video
           className={`sec-video sec-source ${voice.avatarReady ? 'ready' : ''}`}
           ref={avatarVideo}
@@ -647,18 +848,33 @@ function StageRoom({
               中央のボタンで声で話すか、下の欄に文字で話しかけてください。
             </p>
           )}
-          {lines.map((item) =>
-            item.role === 'user' ? (
-              <div key={item.id} className="sec-msg you">
-                <p className="sec-meta">
-                  <span className="sec-you-icon">
-                    <User size={14} />
-                  </span>
-                  あなた <time>{seenAt(item.id)}</time>
-                </p>
-                <p className="sec-bubble">{String(item.content)}</p>
-              </div>
-            ) : (
+          {lines.map((item) => {
+            if (item.role === 'user') {
+              const reportLabel =
+                typeof item.content === 'string'
+                  ? reportMarker.exec(item.content)?.[1]
+                  : undefined;
+              if (reportLabel)
+                return (
+                  <div key={item.id} className="sec-report">
+                    <CalendarClock size={14} />
+                    定時報告・{reportLabel}
+                    <time>{seenAt(item.id)}</time>
+                  </div>
+                );
+              return (
+                <div key={item.id} className="sec-msg you">
+                  <p className="sec-meta">
+                    <span className="sec-you-icon">
+                      <User size={14} />
+                    </span>
+                    あなた <time>{seenAt(item.id)}</time>
+                  </p>
+                  <p className="sec-bubble">{String(item.content)}</p>
+                </div>
+              );
+            }
+            return (
               <div key={item.id} className="sec-msg ai">
                 <span className="sec-ai-icon">
                   <AudioLines size={16} />
@@ -715,8 +931,8 @@ function StageRoom({
                   )}
                 </div>
               </div>
-            ),
-          )}
+            );
+          })}
           {voice.turns.map((turn) =>
             turn.role === 'you' ? (
               <div key={`turn-${turn.id}`} className="sec-msg you voice">
@@ -764,6 +980,43 @@ function StageRoom({
             {error || voice.error}
           </p>
         )}
+        <div className="sec-reports-bar">
+          <span>
+            <strong>定時報告</strong>
+            <small>
+              {nextReport
+                ? `次は ${nextReport.time}（${nextReport.label}）`
+                : '今日の報告は完了'}
+            </small>
+          </span>
+          <button
+            type="button"
+            aria-pressed={reportEnabled}
+            disabled={!reportsReady}
+            onClick={() => {
+              const now = new Date();
+              const day = jstDay(now);
+              setReportState((current) =>
+                current
+                  ? {
+                      enabled: !current.enabled,
+                      day,
+                      done: current.day === day ? current.done : [],
+                    }
+                  : current,
+              );
+            }}
+          >
+            {reportEnabled ? 'ON' : 'OFF'}
+          </button>
+          <button
+            type="button"
+            disabled={running || !loaded || voice.status !== 'idle'}
+            onClick={() => void send(slotForNow(new Date()).prompt)}
+          >
+            今すぐ報告
+          </button>
+        </div>
         <div className="sec-demos" aria-label="デモ">
           {demos
             .filter((demo) => !demo.needs || setup[demo.needs])

@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { Store } from '../src/server/store.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
-import { VoiceService } from '../src/server/voice.js';
+import { VoiceService, voiceGreeting } from '../src/server/voice.js';
 import type { PlatformConfig } from '../src/server/platform-config.js';
 const resources: (() => void)[] = [];
 afterEach(() => {
@@ -67,6 +67,55 @@ function fixture(configOverrides: Partial<PlatformConfig> = {}) {
   return { voice, transport, workspace, store, turn, history };
 }
 const offer = 'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111';
+it('greets in Japanese based on Tokyo time when there is no upcoming event', () => {
+  expect(voiceGreeting(new Date('2026-10-02T23:00:00.000Z'))).toBe(
+    'おはようございます。トレタンです。何をしましょうか？',
+  );
+});
+it('announces a same-day event within an hour', () => {
+  expect(
+    voiceGreeting(new Date('2026-10-03T05:00:00.000Z'), {
+      summary: '打ち合わせ',
+      start: '2026-10-03T14:30:00+09:00',
+    }),
+  ).toBe(
+    'お疲れさまです。トレタンです。30分後に「打ち合わせ」があります。何をしましょうか？',
+  );
+});
+it('announces a same-day event more than an hour away in Tokyo time', () => {
+  expect(
+    voiceGreeting(new Date('2026-10-03T05:00:00.000Z'), {
+      summary: '予定の確認',
+      start: '2026-10-03T16:00:00+09:00',
+    }),
+  ).toBe(
+    'お疲れさまです。トレタンです。次は16:00から「予定の確認」です。何をしましょうか？',
+  );
+});
+it('ignores all-day and next-day events in the greeting', () => {
+  const now = new Date('2026-10-03T05:00:00.000Z');
+  expect(voiceGreeting(now, { summary: '終日', start: '2026-10-03' })).toBe(
+    'お疲れさまです。トレタンです。何をしましょうか？',
+  );
+  expect(
+    voiceGreeting(now, {
+      summary: '明日',
+      start: '2026-10-04T09:00:00+09:00',
+    }),
+  ).toBe('お疲れさまです。トレタンです。何をしましょうか？');
+});
+it('uses the late-night greeting and truncates long event summaries', () => {
+  expect(voiceGreeting(new Date('2026-10-03T12:00:00.000Z'))).toMatch(
+    /^遅くまでお疲れさまです。/,
+  );
+  const summary = '予'.repeat(41);
+  expect(
+    voiceGreeting(new Date('2026-10-03T05:00:00.000Z'), {
+      summary,
+      start: '2026-10-03T16:00:00+09:00',
+    }),
+  ).toContain(`「${'予'.repeat(40)}」`);
+});
 it('binds voice history and compute to the existing thread, deduplicates tools and hangs up remotely', async () => {
   const f = fixture();
   const call = await f.voice.begin(
@@ -256,7 +305,9 @@ it('creates a Gemini Live token with the call setup and returns its setup messag
     setup: {
       model: 'models/voice-model',
       systemInstruction: {
-        parts: [{ text: expect.stringContaining('same language') }],
+        parts: [
+          { text: expect.stringContaining("Reply in the user's language.") },
+        ],
       },
     },
   });
@@ -292,8 +343,11 @@ it('creates an ElevenLabs signed URL and returns conversation overrides', async 
     overrides: {
       agent: {
         prompt: {
-          prompt: expect.stringContaining('same language'),
+          prompt: expect.stringContaining("Reply in the user's language."),
         },
+        firstMessage: expect.stringMatching(
+          /^(?:おはようございます。|お疲れさまです。|遅くまでお疲れさまです。)トレタンです。/,
+        ),
       },
       tts: { voiceId: 'voice-id' },
     },
@@ -343,7 +397,7 @@ it('creates a LiveAvatar LITE session token for the ElevenLabs agent', async () 
     id: expect.any(String),
     provider: 'elevenlabs',
     avatar: { sessionToken: 'session-token' },
-    context: expect.stringContaining('same language'),
+    context: expect.stringContaining("Reply in the user's language."),
   });
 });
 it('forces the LiveAvatar sandbox avatar and flag', async () => {
