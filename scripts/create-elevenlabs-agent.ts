@@ -30,7 +30,13 @@ const response = await fetch(
                 expects_response: true,
                 parameters: {
                   type: 'object',
-                  properties: { request: { type: 'string' } },
+                  properties: {
+                    request: {
+                      type: 'string',
+                      description:
+                        'What the user wants researched, reasoned about, or done, in their own words.',
+                    },
+                  },
                   required: ['request'],
                 },
               },
