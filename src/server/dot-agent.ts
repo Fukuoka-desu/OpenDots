@@ -23,6 +23,7 @@ import { browserResponse } from './research.js';
 import { CalendarClient, calendarTools } from './calendar.js';
 import { GmailClient, gmailTools } from './gmail.js';
 import { sharedGoogleAuth } from './google-auth.js';
+import { tokenCost } from './usage.js';
 import {
   chooseModel,
   Judge,
@@ -244,8 +245,22 @@ export class DotAgent extends AbstractAgent {
                     'One to three concise keyword queries, ideally 3–6 words each.',
                   ),
               }),
-              execute: ({ objective, search_queries }) =>
-                capture(objective, undefined, search_queries),
+              execute: async ({ objective, search_queries }) => {
+                try {
+                  return await capture(objective, undefined, search_queries);
+                } finally {
+                  this.store.addUsage({
+                    at: Date.now(),
+                    service: 'search',
+                    model: 'parallel-search-mcp',
+                    threadId: input.threadId,
+                    runId: input.runId,
+                    costUsd: 0,
+                    priced: true,
+                    detail: 'free endpoint (no API key)',
+                  });
+                }
+              },
             }),
             defineTool({
               name: 'read_public_page',
@@ -351,6 +366,37 @@ export class DotAgent extends AbstractAgent {
               threadId: ctx.input.threadId,
               runId: ctx.input.runId,
               modelOptions: { max_completion_tokens: 2200 },
+              middleware: [
+                {
+                  onUsage: (usageContext, usage) => {
+                    const tokens = {
+                      inputTokens: usage.promptTokens,
+                      cachedInputTokens:
+                        usage.promptTokensDetails?.cachedTokens,
+                      outputTokens: usage.completionTokens,
+                    };
+                    const providerDetails: string[] = [];
+                    if (usage.cost !== undefined)
+                      providerDetails.push(`provider cost ${usage.cost}`);
+                    if (usage.billed)
+                      providerDetails.push(
+                        `provider billed ${usage.billed.quantity} ${usage.billed.unit}`,
+                      );
+                    this.store.addUsage({
+                      at: Date.now(),
+                      service: 'openai',
+                      model,
+                      threadId: usageContext.threadId,
+                      runId: usageContext.runId,
+                      ...tokens,
+                      ...tokenCost(model, tokens),
+                      ...(providerDetails.length
+                        ? { detail: providerDetails.join('; ') }
+                        : {}),
+                    });
+                  },
+                },
+              ],
               agentLoopStrategy: maxIterations(
                 dot.skillDeliveryEnabled && conversation.learningContainerId
                   ? 10

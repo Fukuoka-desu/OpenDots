@@ -12,8 +12,33 @@ import type {
   Task,
   TaskEvent,
 } from '../shared/types.js';
+import type { UsageEvent, UsageService } from './usage.js';
 
 export type Claim = Task & { lease: string };
+type UsageRow = Omit<
+  UsageEvent,
+  | 'threadId'
+  | 'runId'
+  | 'externalId'
+  | 'inputTokens'
+  | 'cachedInputTokens'
+  | 'outputTokens'
+  | 'seconds'
+  | 'credits'
+  | 'detail'
+  | 'priced'
+> & {
+  threadId: string | null;
+  runId: string | null;
+  externalId: string | null;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  outputTokens: number | null;
+  seconds: number | null;
+  credits: number | null;
+  detail: string | null;
+  priced: number;
+};
 const defaults: Settings = {
   name: 'Dot',
   paused: false,
@@ -31,9 +56,11 @@ export class Store {
       CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, taskId TEXT NOT NULL, status TEXT NOT NULL, startedAt INTEGER NOT NULL, finishedAt INTEGER, result TEXT, error TEXT);
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, taskId TEXT NOT NULL, runId TEXT, text TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, text TEXT NOT NULL, createdAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS usage_events (id TEXT PRIMARY KEY, at INTEGER NOT NULL, service TEXT NOT NULL, model TEXT NOT NULL, threadId TEXT, runId TEXT, externalId TEXT UNIQUE, inputTokens INTEGER, cachedInputTokens INTEGER, outputTokens INTEGER, seconds REAL, credits REAL, costUsd REAL NOT NULL, priced INTEGER NOT NULL, detail TEXT);
       CREATE INDEX IF NOT EXISTS tasks_due ON tasks(status, nextRunAt);
       CREATE INDEX IF NOT EXISTS runs_task ON runs(taskId, startedAt);
-      CREATE INDEX IF NOT EXISTS events_task ON events(taskId, id);`);
+      CREATE INDEX IF NOT EXISTS events_task ON events(taskId, id);
+      CREATE INDEX IF NOT EXISTS usage_at ON usage_events(at DESC);`);
     this.db
       .prepare('INSERT OR IGNORE INTO settings VALUES (1, ?)')
       .run(JSON.stringify(defaults));
@@ -276,6 +303,60 @@ export class Store {
         .run(error, now, claim.id);
       this.event(claim.id, claim.lease, error);
     });
+  }
+  addUsage(event: Omit<UsageEvent, 'id'>) {
+    this.db
+      .prepare(
+        'INSERT OR IGNORE INTO usage_events (id, at, service, model, threadId, runId, externalId, inputTokens, cachedInputTokens, outputTokens, seconds, credits, costUsd, priced, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        randomUUID(),
+        event.at,
+        event.service,
+        event.model,
+        event.threadId ?? null,
+        event.runId ?? null,
+        event.externalId ?? null,
+        event.inputTokens ?? null,
+        event.cachedInputTokens ?? null,
+        event.outputTokens ?? null,
+        event.seconds ?? null,
+        event.credits ?? null,
+        event.costUsd,
+        event.priced ? 1 : 0,
+        event.detail ?? null,
+      );
+  }
+  listUsage(sinceMs: number, limit = 500): UsageEvent[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM usage_events WHERE at >= ? ORDER BY at DESC, rowid DESC LIMIT ?',
+      )
+      .all(sinceMs, Math.max(0, Math.floor(limit))) as unknown as UsageRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      at: row.at,
+      service: row.service as UsageService,
+      model: row.model,
+      ...(row.threadId !== null ? { threadId: row.threadId } : {}),
+      ...(row.runId !== null ? { runId: row.runId } : {}),
+      ...(row.externalId !== null ? { externalId: row.externalId } : {}),
+      ...(row.inputTokens !== null ? { inputTokens: row.inputTokens } : {}),
+      ...(row.cachedInputTokens !== null
+        ? { cachedInputTokens: row.cachedInputTokens }
+        : {}),
+      ...(row.outputTokens !== null ? { outputTokens: row.outputTokens } : {}),
+      ...(row.seconds !== null ? { seconds: row.seconds } : {}),
+      ...(row.credits !== null ? { credits: row.credits } : {}),
+      costUsd: row.costUsd,
+      priced: row.priced !== 0,
+      ...(row.detail !== null ? { detail: row.detail } : {}),
+    }));
+  }
+  hasUsageExternalId(id: string): boolean {
+    return !!this.db
+      .prepare('SELECT 1 FROM usage_events WHERE externalId=?')
+      .get(id);
   }
   memories(): Memory[] {
     return this.db

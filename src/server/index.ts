@@ -9,6 +9,7 @@ import { createApp } from './app.js';
 import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
 import type { PlatformConfig } from './platform-config.js';
+import { tokenCost } from './usage.js';
 const host = process.env.HOST ?? '127.0.0.1';
 const port = Number(process.env.PORT ?? 4310);
 const ownerToken = process.env.OWNER_TOKEN;
@@ -42,6 +43,16 @@ const config: PlatformConfig = {
   judgeModel: process.env.TYPESAFE_MODEL,
   judgeGateway:
     !process.env.TYPESAFE_API_KEY && !!process.env.AI_GATEWAY_API_KEY,
+  onUsage: ({ model, inputTokens, outputTokens }) => {
+    store.addUsage({
+      at: Date.now(),
+      service: 'jev',
+      model,
+      inputTokens,
+      outputTokens,
+      ...tokenCost(model, { inputTokens, outputTokens }),
+    });
+  },
   heavyModel: process.env.OPENAI_HEAVY_MODEL,
   baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
   webSearchProvider: webSearchProvider(process.env.WEB_SEARCH_PROVIDER),
