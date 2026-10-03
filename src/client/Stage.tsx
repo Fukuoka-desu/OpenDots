@@ -85,7 +85,12 @@ const actions: Record<
     base: 'メモを作成',
     busy: '準備中',
   },
-  other: { icon: <Wrench size={20} />, name: 'ツール', base: '', busy: '実行中' },
+  other: {
+    icon: <Wrench size={20} />,
+    name: 'ツール',
+    base: '',
+    busy: '実行中',
+  },
 };
 const dockKinds: ActionKind[] = ['calendar', 'mail', 'browser', 'crm', 'memo'];
 
@@ -412,7 +417,9 @@ function StageRoom({
           <p>
             <span className={`sec-live-dot ${onCall ? 'on' : ''}`} />
             <strong>AI秘書</strong>
-            <em className={onCall ? 'on' : ''}>{onCall ? 'LIVE' : 'STANDBY'}</em>
+            <em className={onCall ? 'on' : ''}>
+              {onCall ? 'LIVE' : 'STANDBY'}
+            </em>
           </p>
           <small>Jevが判断する、あなただけのAI秘書</small>
         </div>
