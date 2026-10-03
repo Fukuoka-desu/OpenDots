@@ -628,6 +628,55 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.sec-bubble.sec-md {
+  white-space: normal;
+}
+.sec-md p,
+.sec-md ul,
+.sec-md ol {
+  margin: 0 0 6px;
+}
+.sec-md > :last-child {
+  margin-bottom: 0;
+}
+.sec-md ul,
+.sec-md ol {
+  padding-left: 18px;
+}
+.sec-md li {
+  margin: 2px 0;
+}
+.sec-md a {
+  color: #8fb4ff;
+  word-break: break-all;
+}
+.sec-md table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 4px 0 6px;
+}
+.sec-md th,
+.sec-md td {
+  border: 1px solid var(--line);
+  padding: 3px 6px;
+  text-align: left;
+  white-space: nowrap;
+}
+.sec-md th {
+  background: rgba(61, 123, 255, 0.14);
+}
+.sec-md h1,
+.sec-md h2,
+.sec-md h3 {
+  font-size: 13px;
+  margin: 6px 0 4px;
+}
+.sec-md code {
+  font-size: 12px;
+}
 .sec-msg.you .sec-bubble {
   max-width: 82%;
   background: linear-gradient(180deg, #2b56c8, #2148ad);

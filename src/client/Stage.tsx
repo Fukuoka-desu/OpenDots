@@ -928,7 +928,9 @@ function StageRoom({
                     トレタン <time>{seenAt(item.id)}</time>
                   </p>
                   {typeof item.content === 'string' && item.content.trim() && (
-                    <p className="sec-bubble">{item.content}</p>
+                    <div className="sec-bubble sec-md">
+                      <AssistantMarkdown content={item.content} />
+                    </div>
                   )}
                   {item.role === 'assistant' && !!item.toolCalls?.length && (
                     <ul className="sec-tasks">
@@ -995,7 +997,7 @@ function StageRoom({
                 </span>
                 <div>
                   <p className="sec-meta">トレタン</p>
-                  <div className="sec-bubble">
+                  <div className="sec-bubble sec-md">
                     <AssistantMarkdown content={turn.text} />
                   </div>
                 </div>
