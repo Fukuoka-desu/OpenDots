@@ -142,12 +142,15 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
   );
   app.post('/voice/calls', async (c) => {
     const data = z
-      .object({ threadId: z.string(), sdp: z.string().max(100000) })
+      .object({
+        threadId: z.string(),
+        sdp: z.string().max(100000).optional(),
+      })
       .strict()
       .safeParse(await c.req.json());
     if (!data.success)
       return c.json(
-        { error: 'A conversation and audio SDP offer are required.' },
+        { error: 'A conversation and optional audio SDP offer are required.' },
         400,
       );
     return c.json(

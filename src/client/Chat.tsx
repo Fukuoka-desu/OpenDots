@@ -36,6 +36,7 @@ export function Chat({
   initialPrompt,
   onConsumed,
   voiceReady,
+  voiceProvider,
   calls,
   paused,
   onSaved,
@@ -47,6 +48,7 @@ export function Chat({
   initialPrompt?: string;
   onConsumed: () => void;
   voiceReady: boolean;
+  voiceProvider: 'openai' | 'gemini' | 'elevenlabs';
   calls: CallReceipt[];
   paused: boolean;
   onSaved: () => void;
@@ -92,7 +94,12 @@ export function Chat({
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [running, setRunning] = useState(false);
-  const voice = useVoice(thread.id, onSaved, agent.messages.at(-1)?.id);
+  const voice = useVoice(
+    thread.id,
+    onSaved,
+    voiceProvider,
+    agent.messages.at(-1)?.id,
+  );
   const sent = useRef(false);
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {

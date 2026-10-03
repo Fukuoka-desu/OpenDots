@@ -1,7 +1,7 @@
 const characters = ['blue', 'mint', 'orange', 'purple'] as const;
 
 /** Stable identity keeps each specialist recognizable across views and reloads. */
-function characterFor(identity?: string) {
+export function characterFor(identity?: string) {
   if (!identity) return characters[0];
   let hash = 0;
   for (const character of identity)

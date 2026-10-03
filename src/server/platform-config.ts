@@ -15,7 +15,9 @@ export interface PlatformConfig extends WebConfig {
   browserSecret?: string;
   voiceKey?: string;
   voiceModel?: string;
-  voiceName: string;
+  voiceProvider?: 'openai' | 'gemini' | 'elevenlabs';
+  elevenlabsAgentId?: string;
+  voiceName?: string;
   slackChannel?: string;
   slackTeam?: string;
   slackUsers: string[];
@@ -45,11 +47,19 @@ export function setupStatus(
     : config.slackChannel || config.slackTeam || config.slackUsers.length
       ? 'setup_required'
       : 'not_configured';
+  const voiceConfigured =
+    !!config.voiceKey &&
+    (config.voiceProvider === 'elevenlabs'
+      ? !!config.elevenlabsAgentId
+      : (config.voiceProvider === 'openai' ||
+          config.voiceProvider === 'gemini') &&
+        !!config.voiceModel);
   return {
     intelligence: !!config.intelligenceKey,
     model: !!(config.apiKey && config.model),
     browser: !!(config.browserUrl && config.browserSecret),
-    voice: !!(config.voiceKey && config.voiceModel && !missing.length),
+    voice: voiceConfigured && !missing.length,
+    voiceProvider: config.voiceProvider ?? 'openai',
     slack,
     missing,
   };

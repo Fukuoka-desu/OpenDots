@@ -8,7 +8,7 @@ afterEach(() => {
   resources.splice(0).forEach((close) => close());
   vi.useRealTimers();
 });
-function fixture() {
+function fixture(configOverrides: Partial<PlatformConfig> = {}) {
   const store = new Store(':memory:');
   const workspace = new WorkspaceStore(':memory:', 'owner');
   workspace.bindThread('thread', workspace.dots()[0].id, 'A conversation');
@@ -23,6 +23,7 @@ function fixture() {
     voiceName: 'marin',
     runtimeUrl: '',
     slackUsers: [],
+    ...configOverrides,
   };
   const turn = vi.fn(
     async (_thread: string, _prompt: string, _signal: AbortSignal) =>
@@ -49,6 +50,7 @@ function fixture() {
         intelligence: true,
         model: true,
         browser: false,
+        voiceProvider: 'openai',
         slack: 'not_configured',
         missing: [],
       }),
@@ -92,6 +94,114 @@ it('binds voice history and compute to the existing thread, deduplicates tools a
   await expect(f.voice.compute(call.id, 'late', 'Research')).rejects.toThrow(
     'ended',
   );
+});
+it('creates a Gemini Live token with the call setup and returns its setup message', async () => {
+  const f = fixture({ voiceProvider: 'gemini', voiceName: 'Kore' });
+  f.transport.mockResolvedValueOnce(
+    new Response(JSON.stringify({ name: 'auth_tokens/token' }), {
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  const call = await f.voice.begin(
+    'thread',
+    undefined,
+    new AbortController().signal,
+  );
+  const [url, init] = f.transport.mock.calls[0]!;
+  expect(String(url)).toBe(
+    'https://generativelanguage.googleapis.com/v1beta/auth_tokens',
+  );
+  expect(init?.method).toBe('POST');
+  expect(new Headers(init?.headers).get('x-goog-api-key')).toBe('test-secret');
+  expect(init?.redirect).toBe('error');
+  const body = JSON.parse(String(init?.body));
+  expect(body.authToken).toMatchObject({
+    uses: 1,
+    bidiGenerateContentSetup: {
+      model: 'models/voice-model',
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+        },
+      },
+      tools: [
+        {
+          functionDeclarations: [
+            {
+              name: 'ask_compute',
+              parameters: {
+                type: 'object',
+                properties: { request: { type: 'string' } },
+                required: ['request'],
+              },
+            },
+          ],
+        },
+      ],
+      inputAudioTranscription: {},
+      outputAudioTranscription: {},
+    },
+  });
+  expect(body.authToken.expireTime).toBeTypeOf('string');
+  expect(body.authToken.newSessionExpireTime).toBeTypeOf('string');
+  expect(call).toMatchObject({
+    id: expect.any(String),
+    provider: 'gemini',
+    token: 'auth_tokens/token',
+    model: 'voice-model',
+    setup: {
+      model: 'models/voice-model',
+      systemInstruction: {
+        parts: [{ text: expect.stringContaining('same language') }],
+      },
+    },
+  });
+});
+it('creates an ElevenLabs signed URL and returns conversation overrides', async () => {
+  const f = fixture({
+    voiceProvider: 'elevenlabs',
+    elevenlabsAgentId: 'agent-id',
+    voiceName: 'voice-id',
+  });
+  f.transport.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({ signed_url: 'wss://signed.example/session' }),
+      {
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ),
+  );
+  const call = await f.voice.begin(
+    'thread',
+    undefined,
+    new AbortController().signal,
+  );
+  const [url, init] = f.transport.mock.calls[0]!;
+  expect(String(url)).toBe(
+    'https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=agent-id',
+  );
+  expect(new Headers(init?.headers).get('xi-api-key')).toBe('test-secret');
+  expect(init?.redirect).toBe('error');
+  expect(call).toMatchObject({
+    provider: 'elevenlabs',
+    signedUrl: 'wss://signed.example/session',
+    overrides: {
+      agent: {
+        prompt: {
+          prompt: expect.stringContaining('same language'),
+        },
+      },
+      tts: { voiceId: 'voice-id' },
+    },
+  });
+});
+it('requires an SDP offer for OpenAI before contacting the provider', async () => {
+  const f = fixture({ voiceProvider: 'openai' });
+  await expect(
+    f.voice.begin('thread', undefined, new AbortController().signal),
+  ).rejects.toThrow('SDP offer is required');
+  expect(f.transport).not.toHaveBeenCalled();
 });
 it('rejects unowned threads before provider contact and expires unactivated peers', async () => {
   vi.useFakeTimers();

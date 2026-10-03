@@ -20,6 +20,13 @@ if (
     'External binding requires an OWNER_TOKEN of at least 24 characters.',
   );
 const database = process.env.DATABASE_PATH ?? 'data/opendots.sqlite';
+const voiceProviderValue = process.env.VOICE_PROVIDER;
+const voiceProvider =
+  voiceProviderValue === undefined
+    ? 'openai'
+    : ['openai', 'gemini', 'elevenlabs'].includes(voiceProviderValue)
+      ? (voiceProviderValue as 'openai' | 'gemini' | 'elevenlabs')
+      : undefined;
 const store = new Store(database);
 const workspace = new WorkspaceStore(
   database,
@@ -42,7 +49,15 @@ const config: PlatformConfig = {
   computerNamespace: process.env.COMPUTER_NAMESPACE,
   voiceKey: process.env.VOICE_API_KEY,
   voiceModel: process.env.VOICE_MODEL,
-  voiceName: process.env.VOICE_NAME ?? 'marin',
+  voiceProvider,
+  elevenlabsAgentId: process.env.ELEVENLABS_AGENT_ID,
+  voiceName:
+    process.env.VOICE_NAME ??
+    (voiceProvider === 'openai'
+      ? 'marin'
+      : voiceProvider === 'gemini'
+        ? 'Kore'
+        : undefined),
   slackChannel: process.env.SLACK_CHANNEL_NAME,
   slackTeam: process.env.SLACK_TEAM_ID,
   slackUsers: (process.env.SLACK_USER_IDS ?? '')
