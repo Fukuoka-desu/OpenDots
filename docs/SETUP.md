@@ -111,9 +111,13 @@ Local tests exercise channel behavior with fixtures. A live Slack mention/reply 
 
 ## Calls
 
-The included speech adapter uses the Realtime API at `api.openai.com`. Set `VOICE_API_KEY` to a key with access to that API and `VOICE_MODEL` to a supported Realtime model (the local UI test used `gpt-realtime-2.1`); `VOICE_NAME` selects the voice. `OPENAI_BASE_URL` changes the compute model endpoint only, not speech. Calls use browser microphone access and WebRTC. Hosted deployments need HTTPS. The server mediates provider setup and delegates compute to the selected Dot's conversation.
+Set `VOICE_PROVIDER` to `openai` (the default), `gemini`, or `elevenlabs`. `VOICE_API_KEY` is the selected provider's API key; calls use the browser microphone, and compute continues in the selected Dot's conversation.
 
-A configured key is not evidence of a successful call. Verify microphone access, audio playback, compute delegation, interruption, hangup, and the saved receipt with your deployment before relying on voice workflows.
+- **OpenAI Realtime:** Set `VOICE_API_KEY` and `VOICE_MODEL` to a supported Realtime API key and model. `VOICE_NAME` selects the voice (defaults to `marin`). Calls use WebRTC.
+- **Gemini Live:** Set `VOICE_PROVIDER=gemini`, `VOICE_API_KEY`, and `VOICE_MODEL=gemini-3.8-live`. `VOICE_NAME` selects a prebuilt voice (defaults to `Kore`). The server creates a short-lived Live API token for the browser. `OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/` can also point the compute model at Gemini's OpenAI-compatible endpoint.
+- **ElevenLabs Agents:** Set `VOICE_PROVIDER=elevenlabs`, `VOICE_API_KEY`, and `ELEVENLABS_AGENT_ID`; `VOICE_MODEL` is not needed for calls. Optionally set `VOICE_NAME` to a voice ID. Create an agent with `node --env-file-if-exists=.env --import tsx scripts/create-elevenlabs-agent.ts`; the script prints its agent ID. It uses `VOICE_MODEL` for the agent's TTS model (default `eleven_v4_turbo`).
+
+Hosted deployments need HTTPS. A configured key is not evidence of a successful call. Verify microphone access, audio playback, compute delegation, interruption, hangup, and the saved receipt with your deployment before relying on voice workflows.
 
 ## Containers
 

@@ -39,6 +39,54 @@ it('requires Intelligence and model setup and disables voice when either is abse
     }),
   ).toMatchObject({ missing: ['INTELLIGENCE_API_KEY'], voice: false });
 });
+it('checks voice readiness against each selected provider configuration', () => {
+  expect(
+    setupStatus({
+      ...config,
+      voiceProvider: 'openai',
+      voiceKey: 'fixture',
+      voiceModel: 'fixture',
+    }),
+  ).toMatchObject({ voice: true, voiceProvider: 'openai' });
+  expect(
+    setupStatus({
+      ...config,
+      voiceProvider: 'openai',
+      voiceKey: 'fixture',
+    }).voice,
+  ).toBe(false);
+  expect(
+    setupStatus({
+      ...config,
+      voiceProvider: 'gemini',
+      voiceKey: 'fixture',
+      voiceModel: 'fixture',
+    }),
+  ).toMatchObject({ voice: true, voiceProvider: 'gemini' });
+  expect(
+    setupStatus({
+      ...config,
+      voiceProvider: 'elevenlabs',
+      voiceKey: 'fixture',
+      elevenlabsAgentId: 'agent',
+    }),
+  ).toMatchObject({ voice: true, voiceProvider: 'elevenlabs' });
+  expect(
+    setupStatus({
+      ...config,
+      voiceProvider: 'elevenlabs',
+      voiceKey: 'fixture',
+    }).voice,
+  ).toBe(false);
+  expect(
+    setupStatus({
+      ...config,
+      voiceKey: 'fixture',
+      voiceModel: 'fixture',
+      voiceProvider: undefined,
+    }).voice,
+  ).toBe(false);
+});
 it('reports activation failure until the SDK recovers online', () => {
   const declared = {
     ...config,

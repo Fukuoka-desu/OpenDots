@@ -1,8 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, authHeaders } from './api';
+import { connectElevenLabs } from './voice/elevenlabs';
+import { connectGemini } from './voice/gemini';
+import { connectOpenAI } from './voice/openai';
+import type {
+  VoiceCallbacks,
+  VoiceProvider,
+  VoiceTransportSession,
+} from './voice/types';
+
+type VoiceCallSession = {
+  stream: MediaStream;
+  id?: string;
+  transcript: string[];
+  timer?: ReturnType<typeof setTimeout>;
+  cancelled: boolean;
+  abort: AbortController;
+  transport?: VoiceTransportSession;
+};
+
 export function useVoice(
   threadId: string,
   onSaved: () => void,
+  provider: VoiceProvider,
   anchorMessageId?: string,
 ) {
   const [status, setStatus] = useState<
@@ -20,30 +40,16 @@ export function useVoice(
   );
   const [caption, setCaption] = useState('');
   const [userCaption, setUserCaption] = useState('');
-  const session = useRef<
-    | {
-        pc: RTCPeerConnection;
-        stream: MediaStream;
-        audio: HTMLAudioElement;
-        id?: string;
-        channel: RTCDataChannel;
-        transcript: string[];
-        timer?: ReturnType<typeof setTimeout>;
-        cancelled: boolean;
-      }
-    | undefined
-  >(undefined);
+  const session = useRef<VoiceCallSession | undefined>(undefined);
   const anchor = useRef(anchorMessageId);
   anchor.current = anchorMessageId;
   const closeMedia = useCallback(() => {
     const current = session.current;
     if (!current) return;
     current.cancelled = true;
+    current.abort.abort();
     current.stream.getTracks().forEach((track) => track.stop());
-    current.channel.close();
-    current.pc.close();
-    current.audio.pause();
-    current.audio.srcObject = null;
+    void current.transport?.close();
     clearTimeout(current.timer);
   }, []);
   const end = useCallback(async () => {
@@ -55,13 +61,13 @@ export function useVoice(
       setStatus('idle');
       return;
     }
-    // Silence the call immediately, while keeping the peer alive until the
-    // provider confirms hangup through the server.
     current.cancelled = true;
+    current.transport?.setMicMuted(true);
+    current.transport?.setSpeakerMuted(true);
+    if (!current.transport) current.abort.abort();
     current.stream.getTracks().forEach((track) => {
       track.enabled = false;
     });
-    current.audio.pause();
     clearTimeout(current.timer);
     ending.current = true;
     setStatus('ending');
@@ -135,40 +141,37 @@ export function useVoice(
     setUserCaption('');
     let stream: MediaStream | undefined;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       if (attempt !== generation.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
-      const pc = new RTCPeerConnection();
-      const audio = new Audio();
-      audio.autoplay = true;
-      const channel = pc.createDataChannel('oai-events');
-      const current = {
-        pc,
-        audio,
+      const current: VoiceCallSession = {
         stream,
-        channel,
-        transcript: [] as string[],
+        transcript: [],
         cancelled: false,
-        id: undefined as string | undefined,
-        timer: undefined as ReturnType<typeof setTimeout> | undefined,
+        abort: new AbortController(),
       };
       session.current = current;
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream!));
-      pc.ontrack = (event) => {
-        if (current.cancelled) return;
-        audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-        void audio.play().catch(() => {
-          if (!current.cancelled)
-            setError(
-              'Audio playback was blocked. Check your browser audio permissions.',
-            );
-        });
-      };
-      pc.onconnectionstatechange = () => {
-        if (current.cancelled) return;
-        if (pc.connectionState === 'connected') {
+      const callbacks: VoiceCallbacks = {
+        signal: current.abort.signal,
+        isCancelled: () => current.cancelled || attempt !== generation.current,
+        onCall: (id) => {
+          current.id = id;
+          if (current.cancelled || attempt !== generation.current)
+            void api(`/voice/calls/${id}/end`, 'POST', {
+              transcript: '',
+              anchorMessageId: anchor.current,
+            }).catch(() => {});
+        },
+        onActive: () => {
+          if (current.cancelled || attempt !== generation.current) return;
           setStatus('active');
           setStartedAt((value) => value ?? Date.now());
           if (current.id)
@@ -177,114 +180,42 @@ export function useVoice(
                 if (!current.cancelled) setError(e.message);
               },
             );
-        }
-        if (['failed', 'disconnected'].includes(pc.connectionState)) {
-          setError('The voice connection dropped.');
-          void end();
-        }
-      };
-      channel.onmessage = async (event) => {
-        if (current.cancelled) return;
-        let data: Record<string, unknown>;
-        try {
-          const parsed: unknown = JSON.parse(String(event.data));
-          if (!parsed || typeof parsed !== 'object') return;
-          data = parsed as Record<string, unknown>;
-        } catch {
-          return;
-        }
-        if (data.type === 'input_audio_buffer.speech_started') {
-          setPhase('listening');
-          setCaption('');
-        }
-        if (
-          data.type === 'response.output_audio_transcript.delta' &&
-          typeof data.delta === 'string'
-        ) {
-          setPhase('speaking');
-          setCaption((text) => text + data.delta);
-        }
-        if (data.type === 'output_audio_buffer.stopped') setPhase('listening');
-        if (data.type === 'response.created') {
-          setCaption('');
-          setPhase('thinking');
-        }
-        if (typeof data.transcript === 'string') {
-          if (
-            data.type ===
-            'conversation.item.input_audio_transcription.completed'
-          ) {
-            current.transcript.push(`You: ${data.transcript}`);
-            setUserCaption(data.transcript);
-          }
-          if (data.type === 'response.output_audio_transcript.done')
-            current.transcript.push(`Dot: ${data.transcript}`);
-        }
-        if (data.type === 'error')
-          setError(
-            'The voice provider reported a session error. End the call and retry.',
-          );
-        if (
-          data.type !== 'response.function_call_arguments.done' ||
-          data.name !== 'ask_compute' ||
-          typeof data.call_id !== 'string' ||
-          !current.id
-        )
-          return;
-        let output: string;
-        setPhase('thinking');
-        try {
-          const args: unknown = JSON.parse(String(data.arguments));
-          if (
-            !args ||
-            typeof args !== 'object' ||
-            !('request' in args) ||
-            typeof args.request !== 'string'
-          )
-            throw new Error('Invalid compute request.');
+        },
+        onPhase: setPhase,
+        onCaption: (text) => setCaption((value) => value + text),
+        onCaptionReset: () => setCaption(''),
+        onUserCaption: setUserCaption,
+        onTranscript: (line) => current.transcript.push(line),
+        onError: setError,
+        onClosed: () => {
+          if (!current.cancelled) void end();
+        },
+        compute: async (toolCallId, request) => {
+          if (!current.id) throw new Error('Call is not ready for compute.');
           const result = await api<{ text: string }>(
             `/voice/calls/${current.id}/compute`,
             'POST',
             {
-              toolCallId: data.call_id,
-              request: args.request,
+              toolCallId,
+              request,
               transcript: current.transcript.join('\n').slice(-12000),
             },
           );
-          output = result.text;
-        } catch (e) {
-          output = `Compute failed: ${e instanceof Error ? e.message : 'Unknown error'}`;
-        }
-        if (!current.cancelled && channel.readyState === 'open') {
-          channel.send(
-            JSON.stringify({
-              type: 'conversation.item.create',
-              item: {
-                type: 'function_call_output',
-                call_id: data.call_id,
-                output,
-              },
-            }),
-          );
-          channel.send(JSON.stringify({ type: 'response.create' }));
-        }
+          return result.text;
+        },
       };
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      const response = await api<{ id: string; sdp: string }>(
-        '/voice/calls',
-        'POST',
-        { threadId, sdp: offer.sdp },
-      );
-      current.id = response.id;
-      if (current.cancelled) {
-        await api(`/voice/calls/${response.id}/end`, 'POST', {
-          transcript: '',
-        });
+      const connect = {
+        openai: connectOpenAI,
+        gemini: connectGemini,
+        elevenlabs: connectElevenLabs,
+      }[provider];
+      current.transport = await connect(threadId, stream, callbacks);
+      if (current.cancelled || attempt !== generation.current) {
+        await current.transport.close();
         return;
       }
-      await pc.setRemoteDescription({ type: 'answer', sdp: response.sdp });
-      if (current.cancelled) return;
+      if (provider === 'elevenlabs')
+        stream.getTracks().forEach((track) => track.stop());
       current.timer = setTimeout(() => void end(), 15 * 60_000);
     } catch (e) {
       if (attempt !== generation.current) {
@@ -302,13 +233,17 @@ export function useVoice(
       closeMedia();
       session.current = undefined;
       setStatus('idle');
-      setError(e instanceof Error ? e.message : 'Could not connect the call.');
+      if (!(e instanceof DOMException && e.name === 'AbortError'))
+        setError(
+          e instanceof Error ? e.message : 'Could not connect the call.',
+        );
     } finally {
       if (attempt === generation.current) connecting.current = false;
     }
   };
   const toggleMute = () => {
     const next = !muted;
+    session.current?.transport?.setMicMuted(next);
     session.current?.stream.getAudioTracks().forEach((track) => {
       track.enabled = !next;
     });
@@ -316,9 +251,13 @@ export function useVoice(
   };
   const toggleSpeaker = () => {
     const next = !speakerMuted;
-    if (session.current) session.current.audio.muted = next;
+    session.current?.transport?.setSpeakerMuted(next);
     setSpeakerMuted(next);
   };
+  const getLevels = useCallback(
+    () => session.current?.transport?.getLevels() ?? { input: 0, output: 0 },
+    [],
+  );
   return {
     status,
     error,
@@ -332,5 +271,6 @@ export function useVoice(
     userCaption,
     toggleMute,
     toggleSpeaker,
+    getLevels,
   };
 }
