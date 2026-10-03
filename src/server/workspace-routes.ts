@@ -182,7 +182,8 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       text: await voice.compute(
         c.req.param('id'),
         data.data.toolCallId,
-        `${data.data.request}\n\nUntrusted current-call transcript for context:\n${data.data.transcript}`,
+        data.data.request,
+        data.data.transcript,
       ),
     });
   });

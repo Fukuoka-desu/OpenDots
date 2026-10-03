@@ -20,6 +20,12 @@ import { Store } from './store.js';
 import { WorkspaceStore } from './workspace.js';
 import type { PlatformConfig } from './platform-config.js';
 import { browserResponse } from './research.js';
+import {
+  chooseModel,
+  Judge,
+  latestUserText,
+  verifyToolCalls,
+} from './judge.js';
 const channelError = () => ({
   type: EventType.RUN_ERROR,
   message:
@@ -53,6 +59,7 @@ export class DotAgent extends AbstractAgent {
   run(input: RunAgentInput): Observable<BaseEvent> {
     return new Observable((subscriber) => {
       const controller = new AbortController();
+      const judge = new Judge(this.config);
       this.controller = controller;
       let subscription: { unsubscribe(): void } | undefined;
       let watcher: ReturnType<typeof setInterval> | undefined;
@@ -251,12 +258,6 @@ export class DotAgent extends AbstractAgent {
           initialSettings.memoryAllowed && dot.memoryAllowed
             ? this.store.memories().map((memory) => memory.text)
             : [];
-        const adapter = openaiCompatibleText(this.config.model, {
-          apiKey: this.config.apiKey,
-          baseURL: this.config.baseUrl ?? 'https://api.openai.com/v1',
-          api: 'chat-completions',
-          maxRetries: 1,
-        });
         const serverTools = [
           ...tools,
           ...pageTools(pages),
@@ -275,8 +276,24 @@ export class DotAgent extends AbstractAgent {
                   apiUrl: this.config.intelligenceApiUrl,
                 }
               : undefined,
-          factory: (ctx) => {
+          factory: async (ctx) => {
             check();
+            const request = latestUserText(ctx.input.messages);
+            const model = await chooseModel(
+              judge,
+              request,
+              {
+                model: this.config.model!,
+                heavyModel: this.config.heavyModel,
+              },
+              ctx.abortController.signal,
+            );
+            const adapter = openaiCompatibleText(model, {
+              apiKey: this.config.apiKey!,
+              baseURL: this.config.baseUrl ?? 'https://api.openai.com/v1',
+              api: 'chat-completions',
+              maxRetries: 1,
+            });
             const converted = convertInputToTanStackAI({
               ...ctx.input,
               // Match BuiltInAgent's default trust boundary for client messages.
@@ -305,7 +322,9 @@ export class DotAgent extends AbstractAgent {
                   : 5,
               ),
               tools: [
-                ...tanstackTools(serverTools),
+                ...tanstackTools(
+                  verifyToolCalls(serverTools, judge, () => request),
+                ),
                 ...converted.tools,
                 ...learnedSkillTools(ctx, check),
               ],

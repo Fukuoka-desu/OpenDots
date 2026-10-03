@@ -38,6 +38,11 @@ const config: PlatformConfig = {
   intelligenceWsUrl: process.env.INTELLIGENCE_WS_URL || undefined,
   apiKey: process.env.OPENAI_API_KEY,
   model: process.env.OPENAI_MODEL,
+  judgeKey: process.env.TYPESAFE_API_KEY || process.env.AI_GATEWAY_API_KEY,
+  judgeModel: process.env.TYPESAFE_MODEL,
+  judgeGateway:
+    !process.env.TYPESAFE_API_KEY && !!process.env.AI_GATEWAY_API_KEY,
+  heavyModel: process.env.OPENAI_HEAVY_MODEL,
   baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
   webSearchProvider: webSearchProvider(process.env.WEB_SEARCH_PROVIDER),
   parallelApiKey: process.env.PARALLEL_API_KEY,
