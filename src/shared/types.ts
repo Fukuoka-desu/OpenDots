@@ -107,6 +107,7 @@ export interface SetupStatus {
   judge: boolean;
   browser: boolean;
   voice: boolean;
+  avatar: boolean;
   voiceProvider: 'openai' | 'gemini' | 'elevenlabs';
   slack: string;
   missing: string[];

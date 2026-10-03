@@ -10,16 +10,19 @@ export async function connectElevenLabs(
   threadId: string,
   stream: MediaStream,
   callbacks: VoiceCallbacks,
+  preparedCall?: Extract<VoiceCallResponse, { signedUrl: string }>,
 ): Promise<VoiceTransportSession> {
-  const call = await api<VoiceCallResponse>(
-    '/voice/calls',
-    'POST',
-    { threadId },
-    callbacks.signal,
-  );
-  if (call.provider !== 'elevenlabs')
+  const call =
+    preparedCall ??
+    (await api<VoiceCallResponse>(
+      '/voice/calls',
+      'POST',
+      { threadId },
+      callbacks.signal,
+    ));
+  if (call.provider !== 'elevenlabs' || !('signedUrl' in call))
     throw new Error('Unexpected voice provider.');
-  callbacks.onCall(call.id);
+  if (!preparedCall) callbacks.onCall(call.id);
   if (callbacks.isCancelled())
     throw new DOMException('Call cancelled.', 'AbortError');
   const conversation = await Conversation.startSession({

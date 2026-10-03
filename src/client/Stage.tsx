@@ -412,6 +412,12 @@ function StageRoom({
 
       <section className="sec-stage" aria-label="AI秘書">
         <div className="sec-photo" role="img" aria-label="スーツ姿のAI秘書" />
+        <video
+          className={`sec-video ${voice.avatarReady ? 'ready' : ''}`}
+          ref={voice.avatarVideo}
+          autoPlay
+          playsInline
+        />
         <div className="sec-glow" aria-hidden />
         <div className="sec-badge">
           <p>

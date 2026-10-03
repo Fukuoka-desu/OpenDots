@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, authHeaders } from './api';
 import { connectElevenLabs } from './voice/elevenlabs';
 import { connectGemini } from './voice/gemini';
+import { connectLiveAvatar } from './voice/liveavatar';
 import { connectOpenAI } from './voice/openai';
 import type {
   VoiceCallbacks,
+  VoiceCallResponse,
   VoiceProvider,
   VoiceTransportSession,
 } from './voice/types';
@@ -41,8 +43,14 @@ export function useVoice(
   const [caption, setCaption] = useState('');
   const [userCaption, setUserCaption] = useState('');
   const session = useRef<VoiceCallSession | undefined>(undefined);
+  const video = useRef<HTMLVideoElement | null>(null);
+  const [avatarReady, setAvatarReady] = useState(false);
   const anchor = useRef(anchorMessageId);
   anchor.current = anchorMessageId;
+  const avatarVideo = useCallback((element: HTMLVideoElement | null) => {
+    video.current = element;
+    session.current?.transport?.attachAvatarVideo?.(element);
+  }, []);
   const closeMedia = useCallback(() => {
     const current = session.current;
     if (!current) return;
@@ -139,6 +147,7 @@ export function useVoice(
     setPhase('listening');
     setCaption('');
     setUserCaption('');
+    setAvatarReady(false);
     let stream: MediaStream | undefined;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -186,6 +195,7 @@ export function useVoice(
         onCaptionReset: () => setCaption(''),
         onUserCaption: setUserCaption,
         onTranscript: (line) => current.transcript.push(line),
+        onAvatarReady: setAvatarReady,
         onError: setError,
         onClosed: () => {
           if (!current.cancelled) void end();
@@ -204,17 +214,44 @@ export function useVoice(
           return result.text;
         },
       };
-      const connect = {
-        openai: connectOpenAI,
-        gemini: connectGemini,
-        elevenlabs: connectElevenLabs,
-      }[provider];
-      current.transport = await connect(threadId, stream, callbacks);
+      let usesAvatar = false;
+      if (provider === 'elevenlabs') {
+        const call = await api<VoiceCallResponse>(
+          '/voice/calls',
+          'POST',
+          { threadId },
+          callbacks.signal,
+        );
+        if (call.provider !== 'elevenlabs')
+          throw new Error('Unexpected voice provider.');
+        callbacks.onCall(call.id);
+        if (callbacks.isCancelled())
+          throw new DOMException('Call cancelled.', 'AbortError');
+        if ('avatar' in call) {
+          usesAvatar = true;
+          current.transport = await connectLiveAvatar(
+            call,
+            stream,
+            callbacks,
+            () => video.current,
+          );
+        } else {
+          current.transport = await connectElevenLabs(
+            threadId,
+            stream,
+            callbacks,
+            call,
+          );
+        }
+      } else {
+        const connect = provider === 'openai' ? connectOpenAI : connectGemini;
+        current.transport = await connect(threadId, stream, callbacks);
+      }
       if (current.cancelled || attempt !== generation.current) {
         await current.transport.close();
         return;
       }
-      if (provider === 'elevenlabs')
+      if (provider === 'elevenlabs' && !usesAvatar)
         stream.getTracks().forEach((track) => track.stop());
       current.timer = setTimeout(() => void end(), 15 * 60_000);
     } catch (e) {
@@ -233,6 +270,7 @@ export function useVoice(
       closeMedia();
       session.current = undefined;
       setStatus('idle');
+      setAvatarReady(false);
       if (!(e instanceof DOMException && e.name === 'AbortError'))
         setError(
           e instanceof Error ? e.message : 'Could not connect the call.',
@@ -266,6 +304,8 @@ export function useVoice(
     muted,
     speakerMuted,
     startedAt,
+    avatarVideo,
+    avatarReady,
     phase,
     caption,
     userCaption,

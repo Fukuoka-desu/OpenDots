@@ -171,6 +171,63 @@ export class VoiceService {
       }
       if (provider === 'elevenlabs') {
         const agentId = this.platform.config.elevenlabsAgentId!;
+        if (this.platform.setup().avatar) {
+          const sandbox = this.platform.config.liveAvatarSandbox;
+          const response = await this.transport(
+            'https://api.liveavatar.com/v1/sessions/token',
+            {
+              method: 'POST',
+              headers: {
+                'X-API-KEY': this.platform.config.liveAvatarApiKey!,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                mode: 'LITE',
+                avatar_id: sandbox
+                  ? 'dd73ea75-1218-4ef3-92ce-606d5f7fbc0a'
+                  : this.platform.config.liveAvatarAvatarId,
+                ...(sandbox ? { is_sandbox: true } : {}),
+                elevenlabs_agent_config: {
+                  secret_id: this.platform.config.liveAvatarElevenLabsSecretId,
+                  agent_id: agentId,
+                  ...(this.platform.config.voiceName
+                    ? { voice_id: this.platform.config.voiceName }
+                    : {}),
+                },
+              }),
+              signal: combined,
+              redirect: 'error',
+            },
+          );
+          if (!response.ok)
+            throw new Error(
+              `Voice provider returned HTTP ${response.status}. Check voice configuration and quota.`,
+            );
+          const tokenResponse: unknown = await response.json();
+          if (
+            !tokenResponse ||
+            typeof tokenResponse !== 'object' ||
+            !('data' in tokenResponse) ||
+            !tokenResponse.data ||
+            typeof tokenResponse.data !== 'object' ||
+            !('session_id' in tokenResponse.data) ||
+            typeof tokenResponse.data.session_id !== 'string' ||
+            !tokenResponse.data.session_id ||
+            !('session_token' in tokenResponse.data) ||
+            typeof tokenResponse.data.session_token !== 'string' ||
+            !tokenResponse.data.session_token
+          )
+            throw new Error(
+              'Voice provider returned an invalid session token.',
+            );
+          combined.throwIfAborted();
+          return {
+            id: call.id,
+            provider: 'elevenlabs' as const,
+            avatar: { sessionToken: tokenResponse.data.session_token },
+            context: instructions,
+          };
+        }
         const url = new URL(
           'https://api.elevenlabs.io/v1/convai/conversation/get-signed-url',
         );

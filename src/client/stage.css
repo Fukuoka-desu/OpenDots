@@ -154,6 +154,14 @@
   animation: sec-breathe 5.5s ease-in-out infinite;
   filter: brightness(calc(0.94 + var(--out) * 0.2));
 }
+.sec-video {
+  opacity: 0;
+  transition: opacity 0.4s;
+  z-index: 1;
+}
+.sec-video.ready {
+  opacity: 1;
+}
 .phase-speaking .sec-photo {
   animation-duration: 2.8s;
 }
