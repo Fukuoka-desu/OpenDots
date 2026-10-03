@@ -758,6 +758,11 @@
 .sec-reports-bar button:disabled {
   opacity: 0.55;
 }
+.sec-reports-bar button:hover:not(:disabled),
+.sec-toast button:hover {
+  border-color: #3d7bff;
+  background: rgba(61, 123, 255, 0.28);
+}
 .sec-demos {
   display: flex;
   flex-wrap: wrap;
