@@ -49,6 +49,7 @@ function fixture(configOverrides: Partial<PlatformConfig> = {}) {
         voice: true,
         intelligence: true,
         model: true,
+        judge: false,
         browser: false,
         voiceProvider: 'openai',
         slack: 'not_configured',
@@ -94,6 +95,102 @@ it('binds voice history and compute to the existing thread, deduplicates tools a
   await expect(f.voice.compute(call.id, 'late', 'Research')).rejects.toThrow(
     'ended',
   );
+});
+it('declines forbidden voice compute requests without calling the specialist', async () => {
+  const f = fixture({ judgeKey: 'judge-secret' });
+  f.transport.mockImplementation(async (url) =>
+    String(url) === 'https://api.typesafe.ai/v1/systemone'
+      ? new Response(
+          JSON.stringify({
+            answers: { forbidden: { type: 'noul', noul: 0.95 } },
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        )
+      : String(url).endsWith('/hangup')
+        ? new Response(null, { status: 200 })
+        : new Response('v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111', {
+            headers: { location: '/v1/realtime/calls/rtc_test' },
+          }),
+  );
+  const call = await f.voice.begin(
+    'thread',
+    offer,
+    new AbortController().signal,
+  );
+  f.voice.activate(call.id);
+
+  await expect(
+    f.voice.compute(call.id, 'blocked', 'Send a message.', 'untrusted context'),
+  ).resolves.toBe(
+    'Declined by the call guardrail: from a voice call I can research and reason, but I cannot send messages, make purchases, change permissions, delete data, or operate your device. Ask in the Dot chat instead.',
+  );
+  expect(f.turn).not.toHaveBeenCalled();
+  const [, init] = f.transport.mock.calls[1]!;
+  expect(JSON.parse(String(init?.body))).toMatchObject({
+    state: 'Send a message.',
+    questions: {
+      forbidden: {
+        type: 'noul',
+        instructions:
+          "The request asks the assistant to send a message to someone, make a purchase or payment, change account permissions, delete data, or operate the user's own device.",
+      },
+    },
+  });
+  await f.voice.end(call.id, '');
+});
+
+it('runs allowed voice compute once with the unchanged request and transcript prompt', async () => {
+  const f = fixture({ judgeKey: 'judge-secret' });
+  f.transport.mockImplementation(async (url) =>
+    String(url) === 'https://api.typesafe.ai/v1/systemone'
+      ? new Response(
+          JSON.stringify({
+            answers: { forbidden: { type: 'noul', noul: 0.1 } },
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        )
+      : String(url).endsWith('/hangup')
+        ? new Response(null, { status: 200 })
+        : new Response('v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111', {
+            headers: { location: '/v1/realtime/calls/rtc_test' },
+          }),
+  );
+  const call = await f.voice.begin(
+    'thread',
+    offer,
+    new AbortController().signal,
+  );
+  f.voice.activate(call.id);
+  const prompt =
+    'Research this topic.\n\nUntrusted current-call transcript for context:\nThe caller mentioned context.';
+
+  await Promise.all([
+    f.voice.compute(
+      call.id,
+      'allowed',
+      'Research this topic.',
+      'The caller mentioned context.',
+    ),
+    f.voice.compute(
+      call.id,
+      'allowed',
+      'Research this topic.',
+      'The caller mentioned context.',
+    ),
+  ]);
+
+  expect(f.turn).toHaveBeenCalledTimes(1);
+  expect(f.turn).toHaveBeenCalledWith(
+    'thread',
+    prompt,
+    expect.any(AbortSignal),
+  );
+  expect(
+    f.transport.mock.calls.filter(
+      ([url]) => String(url) === 'https://api.typesafe.ai/v1/systemone',
+    ),
+  ).toHaveLength(1);
+  await f.voice.end(call.id, '');
 });
 it('creates a Gemini Live token with the call setup and returns its setup message', async () => {
   const f = fixture({ voiceProvider: 'gemini', voiceName: 'Kore' });

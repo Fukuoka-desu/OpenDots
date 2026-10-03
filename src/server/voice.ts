@@ -1,4 +1,5 @@
 import type { Platform } from './platform.js';
+import { Judge } from './judge.js';
 
 export function voiceInstructions(
   dot: { name: string; instructions: string },
@@ -20,6 +21,8 @@ export class VoiceService {
       providerId?: string;
     }
   >();
+  private judge: Judge;
+
   constructor(
     private platform: Pick<
       Platform,
@@ -32,7 +35,9 @@ export class VoiceService {
       | 'turn'
     >,
     private transport: typeof fetch = fetch,
-  ) {}
+  ) {
+    this.judge = new Judge(this.platform.config, this.transport);
+  }
   private requireCall(id: string) {
     const call = this.platform.workspace.call(id);
     if (call.endedAt) throw new Error('This call has ended.');
@@ -305,6 +310,7 @@ export class VoiceService {
     id: string,
     toolCallId: string,
     request: string,
+    transcript = '',
   ): Promise<string> {
     const call = this.requireCall(id);
     const job = this.jobs.get(id);
@@ -315,11 +321,32 @@ export class VoiceService {
       throw new Error(
         'This call reached its six compute-turn limit. Start another call to continue.',
       );
-    const pending = this.platform.turn(
-      call.threadId,
-      request,
-      AbortSignal.any([job.controller.signal, AbortSignal.timeout(90_000)]),
-    );
+    const prompt = `${request}\n\nUntrusted current-call transcript for context:\n${transcript}`;
+    const pending = (async () => {
+      if (this.judge.configured) {
+        const answers = await this.judge.ask(
+          request,
+          {
+            forbidden: {
+              type: 'noul',
+              instructions:
+                "The request asks the assistant to send a message to someone, make a purchase or payment, change account permissions, delete data, or operate the user's own device.",
+            },
+          },
+          job.controller.signal,
+        );
+        if (
+          answers?.forbidden.type === 'noul' &&
+          answers.forbidden.noul >= 0.85
+        )
+          return 'Declined by the call guardrail: from a voice call I can research and reason, but I cannot send messages, make purchases, change permissions, delete data, or operate your device. Ask in the Dot chat instead.';
+      }
+      return this.platform.turn(
+        call.threadId,
+        prompt,
+        AbortSignal.any([job.controller.signal, AbortSignal.timeout(90_000)]),
+      );
+    })();
     job.calls.set(toolCallId, pending);
     return pending;
   }

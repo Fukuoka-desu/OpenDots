@@ -104,6 +104,7 @@ export interface CallReceipt {
 export interface SetupStatus {
   intelligence: boolean;
   model: boolean;
+  judge: boolean;
   browser: boolean;
   voice: boolean;
   voiceProvider: 'openai' | 'gemini' | 'elevenlabs';

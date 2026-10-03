@@ -87,6 +87,10 @@ it('checks voice readiness against each selected provider configuration', () => 
     }).voice,
   ).toBe(false);
 });
+it('reports whether optional Jev judgments are configured', () => {
+  expect(setupStatus(config).judge).toBe(false);
+  expect(setupStatus({ ...config, judgeKey: 'fixture' }).judge).toBe(true);
+});
 it('reports activation failure until the SDK recovers online', () => {
   const declared = {
     ...config,

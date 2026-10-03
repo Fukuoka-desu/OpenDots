@@ -40,6 +40,12 @@ Edit `.env` on the server and restart after changes:
 
 The model environment variable names follow the configured provider adapter. Provider credentials belong in `.env`, not client-side variables or source code. Conversation history lives in the configured Intelligence project; copying the SQLite file alone does not back up that history.
 
+## Judgments (TypeSafe Jev)
+
+Optionally set `TYPESAFE_API_KEY` to enable Jev judgments. `TYPESAFE_MODEL` selects the Jev model (default `jev-latest`); `OPENAI_HEAVY_MODEL` enables routing to a heavier OpenAI-compatible model when Jev scores a request as hard (score 2 or higher), or moderate with confidence below 0.6. Leave it empty to disable model routing.
+
+Jev also checks whether side-effecting page/computer tool calls match the latest user request (calls scoring below 0.15 are blocked) and whether a voice-call compute request asks for a forbidden action (scores of 0.85 or higher are declined). These judgments fail open when Jev is unconfigured or unavailable. Jev is a typed judgment model, not a reply generator: it returns choices, scores, and probabilities, never user-facing replies.
+
 ## Pages and page conversations
 
 Select a Space to open its page library. Search for a document, switch between grid and list views, or create a new page. The visual editor supports formatting, headings, lists, checklists, tables, and slash commands. Use `/` to insert a block and Cmd/Ctrl+S to save immediately. Pages autosave after editing pauses; the save status tells you whether changes reached the server.

@@ -5,6 +5,9 @@ export interface PlatformConfig extends WebConfig {
   intelligenceApiUrl?: string;
   intelligenceWsUrl?: string;
   model?: string;
+  judgeKey?: string;
+  judgeModel?: string;
+  heavyModel?: string;
   apiKey?: string;
   baseUrl: string;
   computerSupervisorUrl?: string;
@@ -57,6 +60,7 @@ export function setupStatus(
   return {
     intelligence: !!config.intelligenceKey,
     model: !!(config.apiKey && config.model),
+    judge: !!config.judgeKey,
     browser: !!(config.browserUrl && config.browserSecret),
     voice: voiceConfigured && !missing.length,
     voiceProvider: config.voiceProvider ?? 'openai',
