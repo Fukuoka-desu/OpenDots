@@ -12,7 +12,7 @@ export { slackIdentity } from './slack-channel.js';
 import { Store } from './store.js';
 import { WorkspaceStore } from './workspace.js';
 import { DotAgent } from './dot-agent.js';
-import { runThreadTurn } from './headless.js';
+import { runThreadTurn, type ThreadTurnProgress } from './headless.js';
 import { setupStatus, type PlatformConfig } from './platform-config.js';
 import { validateRuntimeScope } from './runtime-scope.js';
 import { learningSelector } from './learning.js';
@@ -180,6 +180,7 @@ export class Platform {
     prompt: string,
     signal: AbortSignal,
     metadata?: Record<string, unknown>,
+    onProgress?: (step: ThreadTurnProgress) => void,
   ): Promise<string> {
     this.requireReady();
     const thread = this.workspace.requireThread(threadId);
@@ -193,6 +194,7 @@ export class Platform {
       prompt,
       signal,
       metadata,
+      onProgress,
     );
   }
 }

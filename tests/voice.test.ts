@@ -1,8 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { Store } from '../src/server/store.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
-import { VoiceService } from '../src/server/voice.js';
+import { VoiceService, voiceGreeting } from '../src/server/voice.js';
 import type { PlatformConfig } from '../src/server/platform-config.js';
+import type { ThreadTurnProgress } from '../src/server/headless.js';
 const resources: (() => void)[] = [];
 afterEach(() => {
   resources.splice(0).forEach((close) => close());
@@ -26,8 +27,13 @@ function fixture(configOverrides: Partial<PlatformConfig> = {}) {
     ...configOverrides,
   };
   const turn = vi.fn(
-    async (_thread: string, _prompt: string, _signal: AbortSignal) =>
-      'Current answer',
+    async (
+      _thread: string,
+      _prompt: string,
+      _signal: AbortSignal,
+      _metadata?: Record<string, unknown>,
+      _onProgress?: (step: ThreadTurnProgress) => void,
+    ) => 'Current answer',
   );
   const history = vi.fn(async () => 'user: Earlier topic');
   const transport = vi.fn<typeof fetch>(async (url) =>
@@ -67,6 +73,55 @@ function fixture(configOverrides: Partial<PlatformConfig> = {}) {
   return { voice, transport, workspace, store, turn, history };
 }
 const offer = 'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111';
+it('greets in Japanese based on Tokyo time when there is no upcoming event', () => {
+  expect(voiceGreeting(new Date('2026-10-02T23:00:00.000Z'))).toBe(
+    'おはようございます。トレタンです。何をしましょうか？',
+  );
+});
+it('announces a same-day event within an hour', () => {
+  expect(
+    voiceGreeting(new Date('2026-10-03T05:00:00.000Z'), {
+      summary: '打ち合わせ',
+      start: '2026-10-03T14:30:00+09:00',
+    }),
+  ).toBe(
+    'お疲れさまです。トレタンです。30分後に「打ち合わせ」があります。何をしましょうか？',
+  );
+});
+it('announces a same-day event more than an hour away in Tokyo time', () => {
+  expect(
+    voiceGreeting(new Date('2026-10-03T05:00:00.000Z'), {
+      summary: '予定の確認',
+      start: '2026-10-03T16:00:00+09:00',
+    }),
+  ).toBe(
+    'お疲れさまです。トレタンです。次は16:00から「予定の確認」です。何をしましょうか？',
+  );
+});
+it('ignores all-day and next-day events in the greeting', () => {
+  const now = new Date('2026-10-03T05:00:00.000Z');
+  expect(voiceGreeting(now, { summary: '終日', start: '2026-10-03' })).toBe(
+    'お疲れさまです。トレタンです。何をしましょうか？',
+  );
+  expect(
+    voiceGreeting(now, {
+      summary: '明日',
+      start: '2026-10-04T09:00:00+09:00',
+    }),
+  ).toBe('お疲れさまです。トレタンです。何をしましょうか？');
+});
+it('uses the late-night greeting and truncates long event summaries', () => {
+  expect(voiceGreeting(new Date('2026-10-03T12:00:00.000Z'))).toMatch(
+    /^遅くまでお疲れさまです。/,
+  );
+  const summary = '予'.repeat(41);
+  expect(
+    voiceGreeting(new Date('2026-10-03T05:00:00.000Z'), {
+      summary,
+      start: '2026-10-03T16:00:00+09:00',
+    }),
+  ).toContain(`「${'予'.repeat(40)}」`);
+});
 it('binds voice history and compute to the existing thread, deduplicates tools and hangs up remotely', async () => {
   const f = fixture();
   const call = await f.voice.begin(
@@ -101,6 +156,48 @@ it('binds voice history and compute to the existing thread, deduplicates tools a
   await expect(f.voice.compute(call.id, 'late', 'Research')).rejects.toThrow(
     'ended',
   );
+});
+
+it('tracks voice compute steps and deduplicates progress by tool call ID', async () => {
+  const f = fixture();
+  const call = await f.voice.begin(
+    'thread',
+    offer,
+    new AbortController().signal,
+  );
+  f.voice.activate(call.id);
+  f.turn.mockImplementation(
+    async (_thread, _prompt, _signal, _metadata, onProgress) => {
+      onProgress?.({ tool: 'search_web', args: { search_queries: ['q'] } });
+      onProgress?.({ writing: true });
+      return 'ok';
+    },
+  );
+
+  await expect(
+    f.voice.compute(call.id, 'progress-call', 'Research q'),
+  ).resolves.toBe('ok');
+  const [progress] = f.voice.progress(call.id);
+  expect(progress?.steps.map((step) => step.label)).toEqual([
+    '依頼を確認',
+    'ウェブ検索',
+    '結果をまとめています',
+  ]);
+  expect(progress?.done).toBe(true);
+  expect(progress).toMatchObject({
+    toolCallId: 'progress-call',
+    request: 'Research q',
+    steps: [
+      { label: '依頼を確認' },
+      { label: 'ウェブ検索', detail: 'q', tool: 'search_web' },
+      { label: '結果をまとめています' },
+    ],
+  });
+  await expect(
+    f.voice.compute(call.id, 'progress-call', 'Research q'),
+  ).resolves.toBe('ok');
+  expect(f.voice.progress(call.id)).toHaveLength(1);
+  await f.voice.end(call.id, '');
 });
 it('declines forbidden voice compute requests without calling the specialist', async () => {
   const f = fixture({ judgeKey: 'judge-secret' });
@@ -190,6 +287,8 @@ it('runs allowed voice compute once with the unchanged request and transcript pr
     'thread',
     prompt,
     expect.any(AbortSignal),
+    undefined,
+    expect.any(Function),
   );
   expect(
     f.transport.mock.calls.filter(
@@ -256,7 +355,9 @@ it('creates a Gemini Live token with the call setup and returns its setup messag
     setup: {
       model: 'models/voice-model',
       systemInstruction: {
-        parts: [{ text: expect.stringContaining('same language') }],
+        parts: [
+          { text: expect.stringContaining("Reply in the user's language.") },
+        ],
       },
     },
   });
@@ -292,8 +393,11 @@ it('creates an ElevenLabs signed URL and returns conversation overrides', async 
     overrides: {
       agent: {
         prompt: {
-          prompt: expect.stringContaining('same language'),
+          prompt: expect.stringContaining("Reply in the user's language."),
         },
+        firstMessage: expect.stringMatching(
+          /^(?:おはようございます。|お疲れさまです。|遅くまでお疲れさまです。)トレタンです。/,
+        ),
       },
       tts: { voiceId: 'voice-id' },
     },
@@ -343,7 +447,7 @@ it('creates a LiveAvatar LITE session token for the ElevenLabs agent', async () 
     id: expect.any(String),
     provider: 'elevenlabs',
     avatar: { sessionToken: 'session-token' },
-    context: expect.stringContaining('same language'),
+    context: expect.stringContaining("Reply in the user's language."),
   });
 });
 it('forces the LiveAvatar sandbox avatar and flag', async () => {

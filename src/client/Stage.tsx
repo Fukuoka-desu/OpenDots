@@ -15,7 +15,9 @@ import {
   AudioLines,
   BookOpen,
   Brain,
+  CalendarClock,
   CalendarDays,
+  Check,
   CircleCheck,
   Database,
   FileText,
@@ -29,6 +31,7 @@ import {
   Phone,
   PhoneOff,
   Plus,
+  Search,
   SendHorizontal,
   Settings,
   SquareCheck,
@@ -36,19 +39,31 @@ import {
   User,
   Users,
   Wrench,
+  Wallet,
 } from 'lucide-react';
 import { api, authHeaders } from './api';
 import type { AudioLevels, LiveDotPhase } from './LiveDot';
-import { isInternalVoiceReceipt } from './ChatTranscript';
+import { AssistantMarkdown, isInternalVoiceReceipt } from './ChatTranscript';
 import { useVoice } from './useVoice';
 import { startChromaKey } from './chromaKey';
 import { VoiceWave } from './VoiceWave';
+import {
+  dueReport,
+  jstDay,
+  reportMarker,
+  reportSlots,
+  slotForNow,
+} from './reports';
 import type {
   Conversation,
   Dot,
   SetupStatus,
   WorkspaceState,
 } from '../shared/types';
+import {
+  voiceComputeRequest,
+  type VoiceComputeStep,
+} from '../shared/voice-compute';
 import './stage.css';
 
 const dotKey = 'opendots-stage-dot';
@@ -58,6 +73,35 @@ const clock = new Intl.DateTimeFormat('ja-JP', {
   hour: '2-digit',
   minute: '2-digit',
 });
+const tokyoClock = new Intl.DateTimeFormat('ja-JP', {
+  timeZone: 'Asia/Tokyo',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+const reportsKey = 'toretan.reports.v1';
+const remindedKey = 'toretan.reminded.v1';
+
+type ReportState = { enabled: boolean; day: string; done: string[] };
+type ReminderState = { day: string; ids: string[] };
+type UpcomingEvent = { id: string; summary: string; start: string };
+
+function storedValue(key: string): unknown {
+  try {
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveValue(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    return;
+  }
+}
 
 type ActionKind =
   'code' | 'calendar' | 'mail' | 'browser' | 'crm' | 'memo' | 'other';
@@ -109,6 +153,72 @@ const actions: Record<
   },
 };
 const dockKinds: ActionKind[] = ['code', 'mail', 'browser', 'memo', 'calendar'];
+
+const toolLabels: Record<string, string> = {
+  gmail_search_messages: 'メールを検索',
+  gmail_read_message: 'メールを読み込み',
+  gmail_create_draft: '下書きを作成',
+  gmail_send_draft: 'メールを送信',
+  calendar_list_events: '予定を確認',
+  calendar_create_event: '予定を追加',
+};
+
+type Demo = { label: string; prompt: string; needs?: 'mail' };
+const demos: Demo[] = [
+  {
+    label: 'ニュース調査',
+    prompt:
+      '今日のAI業界の主要ニュースを3つ調べて、出典URL付きで要点を短くまとめて。',
+  },
+  {
+    label: 'サイト要約',
+    prompt:
+      'https://news.ycombinator.com を開いて、いま話題の記事トップ5を日本語で要約して。',
+  },
+  {
+    label: 'データ分析',
+    prompt:
+      'あなたのコンピューターで、架空の月次売上データ（12か月分・商品3種類）をCSVで作り、Pythonで月別合計・商品別合計・前月比を集計して、結果を表で見せて。',
+  },
+  {
+    label: 'コーディング',
+    prompt:
+      'あなたのコンピューターで、1〜30のFizzBuzzを出力するPythonプログラムを書いて実行し、コードと実行結果を見せて。',
+  },
+  {
+    label: '議事メモ',
+    prompt:
+      '次の会話から議事メモ（決定事項・ToDo・担当・期限）を作って、ページとして保存して：「来週の展示会は田中さんがブース設営、佐藤さんがチラシ500部を金曜までに手配。予算は30万円以内で決定。次回定例は月曜10時。」',
+  },
+  {
+    label: 'メール要約',
+    prompt: '受信トレイの最新5件を要約して、返信が必要そうなものを教えて。',
+    needs: 'mail',
+  },
+  {
+    label: '返信の下書き',
+    prompt:
+      '受信トレイで一番新しい、返信が必要そうなメールに丁寧な返信の下書きを作って見せて。まだ送信はしないで。',
+    needs: 'mail',
+  },
+  {
+    label: '競合比較→メール',
+    prompt:
+      'Notion AI と ChatGPT Team の料金と主な機能を調べて比較表にし、その内容で自分宛てのメール下書きを作って見せて。',
+    needs: 'mail',
+  },
+  {
+    label: '今日の予定',
+    prompt: '今日と明日の予定を教えて。',
+    needs: 'mail',
+  },
+  {
+    label: '予定を追加',
+    prompt:
+      '来週月曜の15時から30分、「トレタンデモ振り返り」という予定をカレンダーに入れて。',
+    needs: 'mail',
+  },
+];
 
 function kindOf(tool: string): ActionKind {
   if (/computer_(exec|files)|shell|terminal|code/i.test(tool)) return 'code';
@@ -183,7 +293,7 @@ export function Stage() {
       setThread(
         await api<Conversation>('/conversations', 'POST', {
           dotId: target.id,
-          title: 'AI秘書との会話',
+          title: 'トレタンとの会話',
         }),
       );
     } catch (e) {
@@ -214,7 +324,7 @@ export function Stage() {
               ? `セットアップが必要です: ${state.setup.missing.join(', ')}`
               : state && !state.dots.length
                 ? 'Dot がまだありません。ワークスペースで作成してください。'
-                : 'AI秘書を呼んでいます…')}
+                : 'トレタンを呼んでいます…')}
         </p>
         <a href="/">ワークスペースを開く</a>
       </div>
@@ -244,6 +354,7 @@ function Rail() {
     [<Users key="r" />, 'CRM'],
     [<Globe key="b" />, 'ブラウザ'],
     [<BookOpen key="k" />, 'ナレッジ'],
+    [<Wallet key="u" />, '料金'],
   ];
   return (
     <nav className="sec-rail" aria-label="メニュー">
@@ -255,7 +366,7 @@ function Rail() {
         <a
           key={label}
           className={`sec-rail-item ${i === 0 ? 'active' : ''}`}
-          href={i === 0 ? '/?stage' : '/'}
+          href={i === 0 ? '/?stage' : label === '料金' ? '/?usage' : '/'}
           aria-current={i === 0 ? 'page' : undefined}
         >
           {icon}
@@ -277,6 +388,35 @@ function Bars({ count, className }: { count: number; className: string }) {
         <i key={i} style={{ '--i': i } as React.CSSProperties} />
       ))}
     </span>
+  );
+}
+
+function ResearchSteps({ steps }: { steps: VoiceComputeStep[] }) {
+  const recent = steps.slice(-4);
+  return (
+    <ol className="sec-research-steps">
+      {recent.map((step, index) => {
+        const current = index === recent.length - 1;
+        return (
+          <li
+            key={`${step.at}-${index}`}
+            className={current ? 'current' : 'complete'}
+          >
+            {current ? (
+              <span className="sec-research-dot" aria-hidden />
+            ) : (
+              <Check size={14} aria-hidden />
+            )}
+            <span className="sec-research-step-copy">
+              <strong>{step.label}</strong>
+              {step.detail && (
+                <span className="sec-research-detail">「{step.detail}」</span>
+              )}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -303,6 +443,18 @@ function StageRoom({
   const { copilotkit } = useCopilotKit();
   const [loaded, setLoaded] = useState(false);
   const [running, setRunning] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const [reportState, setReportState] = useState<ReportState>();
+  const [reportsReady, setReportsReady] = useState(false);
+  const [toast, setToast] = useState<{
+    id: string;
+    summary: string;
+    time: string;
+    minutes: number;
+  }>();
+  const [remindersReady, setRemindersReady] = useState(false);
+  const reminded = useRef<ReminderState>({ day: '', ids: [] });
+  const sendRef = useRef<(preset?: string) => Promise<void>>(async () => {});
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const root = useRef<HTMLDivElement>(null);
@@ -315,6 +467,16 @@ function StageRoom({
     setup.voiceProvider,
     agent.messages.at(-1)?.id,
   );
+  const ticking = running || voice.computing !== undefined;
+  useEffect(() => {
+    if (!ticking) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [ticking]);
+  const researchSeconds = voice.computing
+    ? Math.max(0, Math.floor((now - voice.computing.startedAt) / 1000))
+    : 0;
   useLevelVars(root, voice.getLevels);
   const keyCanvas = useRef<HTMLCanvasElement>(null);
   const sourceVideo = useRef<HTMLVideoElement | null>(null);
@@ -353,6 +515,45 @@ function StageRoom({
       active = false;
     };
   }, [agent, copilotkit, isReady]);
+  useEffect(() => {
+    const day = jstDay(new Date());
+    const value = storedValue(reportsKey);
+    const saved =
+      value && typeof value === 'object'
+        ? (value as Partial<ReportState>)
+        : undefined;
+    setReportState({
+      enabled: typeof saved?.enabled === 'boolean' ? saved.enabled : true,
+      day,
+      done:
+        saved?.day === day && Array.isArray(saved.done)
+          ? saved.done.filter((id): id is string => typeof id === 'string')
+          : [],
+    });
+    setReportsReady(true);
+  }, []);
+  useEffect(() => {
+    if (!reportsReady || !reportState) return;
+    saveValue(reportsKey, reportState);
+  }, [reportState, reportsReady]);
+  useEffect(() => {
+    const day = jstDay(new Date());
+    const value = storedValue(remindedKey);
+    const saved =
+      value && typeof value === 'object'
+        ? (value as Partial<ReminderState>)
+        : undefined;
+    const state: ReminderState = {
+      day,
+      ids:
+        saved?.day === day && Array.isArray(saved.ids)
+          ? saved.ids.filter((id): id is string => typeof id === 'string')
+          : [],
+    };
+    reminded.current = state;
+    if (saved?.day !== day) saveValue(remindedKey, state);
+    setRemindersReady(true);
+  }, []);
 
   const finished = new Set(
     agent.messages.flatMap((item) =>
@@ -367,6 +568,8 @@ function StageRoom({
   const callState = (call: ToolCall) =>
     finished.has(call.id) ? 'done' : working ? 'busy' : 'stopped';
   const dockState = (kind: ActionKind) => {
+    const progressTool = voice.computing?.steps.at(-1)?.tool;
+    if (progressTool && kindOf(progressTool) === kind) return 'busy';
     const mine = calls.filter((call) => kindOf(call.function.name) === kind);
     if (mine.some((call) => callState(call) === 'busy')) return 'busy';
     return mine.length && callState(mine.at(-1)!) === 'done' ? 'done' : 'idle';
@@ -382,16 +585,41 @@ function StageRoom({
           ((typeof item.content === 'string' && !!item.content.trim()) ||
             !!item.toolCalls?.length))),
   );
+  const completedVoiceRequests = new Set(
+    voice.turns.flatMap((turn) =>
+      turn.role === 'result' && turn.request !== undefined
+        ? [turn.request.trim()]
+        : [],
+    ),
+  );
+  const hiddenVoiceComputeMessages = new Set<string>();
+  let hideVoiceComputeMessages = false;
+  for (const item of agent.messages) {
+    if (item.role === 'user') {
+      const request =
+        typeof item.content === 'string'
+          ? voiceComputeRequest(item.content)
+          : undefined;
+      hideVoiceComputeMessages =
+        request !== undefined && completedVoiceRequests.has(request);
+      if (hideVoiceComputeMessages) hiddenVoiceComputeMessages.add(item.id);
+    } else if (hideVoiceComputeMessages) {
+      hiddenVoiceComputeMessages.add(item.id);
+    }
+  }
+  const visibleLines = lines.filter(
+    (item) => !hiddenVoiceComputeMessages.has(item.id),
+  );
   const live = voice.status === 'active';
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'end' });
   }, [lines.length, running, voice.turns.length, voice.phase]);
 
-  const send = async () => {
-    const text = draft.trim();
+  const send = async (preset?: string) => {
+    const text = (preset ?? draft).trim();
     if (!text || running || !loaded) return;
     setError('');
-    setDraft('');
+    if (preset === undefined) setDraft('');
     setRunning(true);
     agent.addMessage({ id: crypto.randomUUID(), role: 'user', content: text });
     try {
@@ -402,6 +630,101 @@ function StageRoom({
       setRunning(false);
     }
   };
+  useEffect(() => {
+    sendRef.current = send;
+  }, [send]);
+  useEffect(() => {
+    if (!loaded || !reportsReady || !reportState) return;
+    const check = () => {
+      const now = new Date();
+      const day = jstDay(now);
+      const current =
+        reportState.day === day
+          ? reportState
+          : { ...reportState, day, done: [] };
+      if (current !== reportState) setReportState(current);
+      if (!current.enabled || running || voice.status !== 'idle') return;
+      const due = dueReport(now, current.done);
+      if (!due) return;
+      setReportState({
+        ...current,
+        done: [...new Set([...current.done, ...due.handled])],
+      });
+      if (due.slot) void sendRef.current(due.slot.prompt);
+    };
+    check();
+    const interval = setInterval(check, 30_000);
+    return () => clearInterval(interval);
+  }, [loaded, reportState, reportsReady, running, voice.status]);
+  useEffect(() => {
+    if (!setup.mail || !remindersReady) return;
+    let active = true;
+    let checking = false;
+    const check = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        let day = jstDay(new Date());
+        let current = reminded.current;
+        if (current.day !== day) {
+          current = { day, ids: [] };
+          reminded.current = current;
+          saveValue(remindedKey, current);
+        }
+        const { events } = await api<{ events: UpcomingEvent[] }>(
+          '/calendar/upcoming?minutes=15',
+        );
+        if (!active) return;
+        const now = new Date();
+        day = jstDay(now);
+        current = reminded.current;
+        if (current.day !== day) {
+          current = { day, ids: [] };
+          reminded.current = current;
+          saveValue(remindedKey, current);
+        }
+        const candidate = events
+          .filter((event) => {
+            if (!event.id || !/^\d{4}-\d{2}-\d{2}T/.test(event.start))
+              return false;
+            const start = Date.parse(event.start);
+            const remaining = start - now.getTime();
+            return (
+              Number.isFinite(start) &&
+              remaining > 0 &&
+              remaining <= 10 * 60_000 &&
+              !current.ids.includes(event.id)
+            );
+          })
+          .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
+          .at(-1);
+        if (!candidate) return;
+        const start = Date.parse(candidate.start);
+        const updated = {
+          day,
+          ids: [...current.ids, candidate.id],
+        };
+        reminded.current = updated;
+        saveValue(remindedKey, updated);
+        setToast({
+          id: candidate.id,
+          summary: candidate.summary,
+          time: tokyoClock.format(new Date(start)),
+          minutes: Math.ceil((start - now.getTime()) / 60_000),
+        });
+      } catch {
+        return;
+      } finally {
+        checking = false;
+      }
+    };
+    void check();
+    const interval = setInterval(() => void check(), 60_000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [remindersReady, setup.mail]);
   const phase: LiveDotPhase =
     voice.status === 'connecting'
       ? 'connecting'
@@ -415,8 +738,12 @@ function StageRoom({
     connecting: 'つないでいます…',
     listening: voice.muted ? 'ミュート中' : '聞いています…',
     thinking: '考えています…',
-    speaking: 'AIが話しています…',
+    speaking: 'トレタンが話しています…',
   }[phase];
+  const reportDone =
+    reportState?.day === jstDay(new Date()) ? reportState.done : [];
+  const nextReport = reportSlots.find((slot) => !reportDone.includes(slot.id));
+  const reportEnabled = reportState?.enabled ?? true;
   const voiceName =
     setup.voiceProvider === 'elevenlabs'
       ? 'ElevenLabs'
@@ -428,7 +755,7 @@ function StageRoom({
     <div ref={root} className={`sec phase-${phase}`}>
       <Rail />
       <header className="sec-top">
-        <span>考え、動き、つながる —— あなたのAI秘書</span>
+        <span>考え、動き、つながる —— あなたの相棒トレタン</span>
         <span className="sec-top-tools">
           <select
             aria-label="話す Dot"
@@ -450,9 +777,33 @@ function StageRoom({
 
       <section
         className={`sec-stage ${voice.avatarReady ? 'avatar-on' : ''}`}
-        aria-label="AI秘書"
+        aria-label="トレタン"
       >
         <VoiceWave phase={phase} getLevels={voice.getLevels} />
+        {voice.computing && (
+          <div className="sec-research" role="status">
+            <div className="sec-research-head">
+              <Search className="sec-research-spinner" size={16} aria-hidden />
+              <strong>調べています · {researchSeconds}秒</strong>
+            </div>
+            <ResearchSteps steps={voice.computing.steps} />
+          </div>
+        )}
+        {toast && (
+          <div className="sec-toast" role="status" key={toast.id}>
+            <span>
+              まもなく予定：{toast.time}「{toast.summary}」（あと{toast.minutes}
+              分）
+            </span>
+            <button
+              type="button"
+              aria-label="閉じる"
+              onClick={() => setToast(undefined)}
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <video
           className={`sec-video sec-source ${voice.avatarReady ? 'ready' : ''}`}
           ref={avatarVideo}
@@ -468,12 +819,12 @@ function StageRoom({
         <div className="sec-badge">
           <p>
             <span className={`sec-live-dot ${onCall ? 'on' : ''}`} />
-            <strong>AI秘書</strong>
+            <strong>トレタン</strong>
             <em className={onCall ? 'on' : ''}>
               {onCall ? 'LIVE' : 'STANDBY'}
             </em>
           </p>
-          <small>Jevが判断する、あなただけのAI秘書</small>
+          <small>Jevが判断する、あなただけの相棒</small>
         </div>
         <div className="sec-actions">
           <h3>実行中のアクション</h3>
@@ -551,7 +902,7 @@ function StageRoom({
             <AudioLines />
           </span>
           <span>
-            <h2>AI秘書</h2>
+            <h2>トレタン</h2>
             <small>Jevが判断 / Voice Agent</small>
           </span>
           <dl className="sec-stack">
@@ -579,28 +930,63 @@ function StageRoom({
               中央のボタンで声で話すか、下の欄に文字で話しかけてください。
             </p>
           )}
-          {lines.map((item) =>
-            item.role === 'user' ? (
-              <div key={item.id} className="sec-msg you">
-                <p className="sec-meta">
-                  <span className="sec-you-icon">
-                    <User size={14} />
-                  </span>
-                  あなた <time>{seenAt(item.id)}</time>
-                </p>
-                <p className="sec-bubble">{String(item.content)}</p>
-              </div>
-            ) : (
+          {visibleLines.map((item) => {
+            if (item.role === 'user') {
+              const computeRequest =
+                typeof item.content === 'string'
+                  ? voiceComputeRequest(item.content)
+                  : undefined;
+              if (computeRequest !== undefined) {
+                const requestChars = Array.from(computeRequest);
+                const displayRequest =
+                  requestChars.length > 60
+                    ? `${requestChars.slice(0, 60).join('')}…`
+                    : computeRequest;
+                return (
+                  <div key={item.id} className="sec-report sec-voice-request">
+                    <Mic size={14} />
+                    <span>音声での依頼：{displayRequest}</span>
+                    <time>{seenAt(item.id)}</time>
+                  </div>
+                );
+              }
+              const reportLabel =
+                typeof item.content === 'string'
+                  ? reportMarker.exec(item.content)?.[1]
+                  : undefined;
+              if (reportLabel)
+                return (
+                  <div key={item.id} className="sec-report">
+                    <CalendarClock size={14} />
+                    定時報告・{reportLabel}
+                    <time>{seenAt(item.id)}</time>
+                  </div>
+                );
+              return (
+                <div key={item.id} className="sec-msg you">
+                  <p className="sec-meta">
+                    <span className="sec-you-icon">
+                      <User size={14} />
+                    </span>
+                    あなた <time>{seenAt(item.id)}</time>
+                  </p>
+                  <p className="sec-bubble">{String(item.content)}</p>
+                </div>
+              );
+            }
+            return (
               <div key={item.id} className="sec-msg ai">
                 <span className="sec-ai-icon">
                   <AudioLines size={16} />
                 </span>
                 <div>
                   <p className="sec-meta">
-                    AI秘書 <time>{seenAt(item.id)}</time>
+                    トレタン <time>{seenAt(item.id)}</time>
                   </p>
                   {typeof item.content === 'string' && item.content.trim() && (
-                    <p className="sec-bubble">{item.content}</p>
+                    <div className="sec-bubble sec-md">
+                      <AssistantMarkdown content={item.content} />
+                    </div>
                   )}
                   {item.role === 'assistant' && !!item.toolCalls?.length && (
                     <ul className="sec-tasks">
@@ -608,7 +994,10 @@ function StageRoom({
                         const kind = kindOf(call.function.name);
                         const status = callState(call);
                         const base =
-                          actions[kind].base || `${call.function.name} を実行`;
+                          toolLabels[call.function.name] ||
+                          actions[kind].base ||
+                          `${call.function.name} を実行`;
+                        const sent = call.function.name === 'gmail_send_draft';
                         return (
                           <li key={call.id} className={status}>
                             <span className="sec-task-icon">
@@ -623,8 +1012,10 @@ function StageRoom({
                                     : `${base}（中断）`}
                               </strong>
                               <small>
-                                {detail(call.function.arguments) ||
-                                  call.function.name}
+                                {sent
+                                  ? '確認済みの下書きを送信'
+                                  : detail(call.function.arguments) ||
+                                    call.function.name}
                               </small>
                             </span>
                             {status === 'done' ? (
@@ -642,8 +1033,8 @@ function StageRoom({
                   )}
                 </div>
               </div>
-            ),
-          )}
+            );
+          })}
           {voice.turns.map((turn) =>
             turn.role === 'you' ? (
               <div key={`turn-${turn.id}`} className="sec-msg you voice">
@@ -655,35 +1046,63 @@ function StageRoom({
                 </p>
                 <p className="sec-bubble">{turn.text}</p>
               </div>
+            ) : turn.role === 'result' ? (
+              <div key={`turn-${turn.id}`} className="sec-msg ai voice">
+                <span className="sec-ai-icon">
+                  <AudioLines size={16} />
+                </span>
+                <div>
+                  <p className="sec-meta">トレタン</p>
+                  <div className="sec-bubble sec-md">
+                    <AssistantMarkdown content={turn.text} />
+                  </div>
+                </div>
+              </div>
             ) : (
               <div key={`turn-${turn.id}`} className="sec-msg ai voice">
                 <span className="sec-ai-icon">
                   <AudioLines size={16} />
                 </span>
                 <div>
-                  <p className="sec-meta">AI秘書（音声）</p>
+                  <p className="sec-meta">トレタン（音声）</p>
                   <p className="sec-bubble">{turn.text}</p>
                 </div>
               </div>
             ),
           )}
-          {(running || (live && voice.phase === 'thinking')) && (
-            <div className="sec-msg ai pending">
-              <span className="sec-ai-icon">
-                <AudioLines size={16} />
-              </span>
-              <div>
-                <p className="sec-typing">
-                  <Bars count={6} className="sec-mini-wave" />
-                  <span className="sec-dots">
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                </p>
+          {(running ||
+            (live && voice.phase === 'thinking') ||
+            voice.computing) &&
+            (voice.computing ? (
+              <div className="sec-msg ai pending">
+                <span className="sec-ai-icon">
+                  <AudioLines size={16} />
+                </span>
+                <div>
+                  <p className="sec-meta">トレタン</p>
+                  <div className="sec-bubble sec-research-chat">
+                    <p>調べています（{researchSeconds}秒）</p>
+                    <ResearchSteps steps={voice.computing.steps} />
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="sec-msg ai pending">
+                <span className="sec-ai-icon">
+                  <AudioLines size={16} />
+                </span>
+                <div>
+                  <p className="sec-typing">
+                    <Bars count={6} className="sec-mini-wave" />
+                    <span className="sec-dots">
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                  </p>
+                </div>
+              </div>
+            ))}
           <div ref={bottom} />
         </div>
         {(error || voice.error) && (
@@ -691,6 +1110,57 @@ function StageRoom({
             {error || voice.error}
           </p>
         )}
+        <div className="sec-reports-bar">
+          <span>
+            <strong>定時報告</strong>
+            <small>
+              {nextReport
+                ? `次は ${nextReport.time}（${nextReport.label}）`
+                : '今日の報告は完了'}
+            </small>
+          </span>
+          <button
+            type="button"
+            aria-pressed={reportEnabled}
+            disabled={!reportsReady}
+            onClick={() => {
+              const now = new Date();
+              const day = jstDay(now);
+              setReportState((current) =>
+                current
+                  ? {
+                      enabled: !current.enabled,
+                      day,
+                      done: current.day === day ? current.done : [],
+                    }
+                  : current,
+              );
+            }}
+          >
+            {reportEnabled ? 'ON' : 'OFF'}
+          </button>
+          <button
+            type="button"
+            disabled={running || !loaded || voice.status !== 'idle'}
+            onClick={() => void send(slotForNow(new Date()).prompt)}
+          >
+            今すぐ報告
+          </button>
+        </div>
+        <div className="sec-demos" aria-label="デモ">
+          {demos
+            .filter((demo) => !demo.needs || setup[demo.needs])
+            .map((demo) => (
+              <button
+                key={demo.label}
+                type="button"
+                disabled={running || !loaded}
+                onClick={() => void send(demo.prompt)}
+              >
+                {demo.label}
+              </button>
+            ))}
+        </div>
         <form
           className="sec-input"
           onSubmit={(e) => {

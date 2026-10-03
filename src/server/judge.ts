@@ -20,6 +20,12 @@ export type JudgeAnswer =
       probabilities: Record<string, number>;
     };
 
+export type JudgeUsage = {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -84,12 +90,14 @@ export class Judge {
   private judgeKey?: string;
   private judgeModel?: string;
   private judgeGateway: boolean;
+  private onUsage?: (usage: JudgeUsage) => void;
 
   constructor(
     config: {
       judgeKey?: string;
       judgeModel?: string;
       judgeGateway?: boolean;
+      onUsage?: (usage: JudgeUsage) => void;
     },
     private fetcher: typeof fetch = fetch,
   ) {
@@ -97,6 +105,7 @@ export class Judge {
     this.judgeModel = config.judgeModel;
     this.judgeGateway =
       !!config.judgeGateway || !!config.judgeKey?.startsWith('vck_');
+    this.onUsage = config.onUsage;
   }
 
   get configured(): boolean {
@@ -158,6 +167,27 @@ export class Judge {
         return undefined;
       }
       const parsedBody: unknown = await response.json();
+      if (isRecord(parsedBody) && isRecord(parsedBody.usage)) {
+        const inputTokens = parsedBody.usage.inputTokens;
+        const outputTokens = parsedBody.usage.outputTokens;
+        if (
+          typeof inputTokens === 'number' &&
+          typeof outputTokens === 'number'
+        ) {
+          try {
+            this.onUsage?.({
+              model:
+                (typeof parsedBody.model === 'string' && parsedBody.model) ||
+                this.judgeModel ||
+                'typesafe-ai/jev',
+              inputTokens,
+              outputTokens,
+            });
+          } catch {
+            console.warn('Jev usage callback failed.');
+          }
+        }
+      }
       const responseBody = this.judgeGateway
         ? normalizeGatewayResponse(parsedBody)
         : parsedBody;
@@ -226,6 +256,7 @@ export async function chooseModel(
 function isSideEffectTool(name: string) {
   if (name === 'create_space_page' || name === 'edit_space_page') return true;
   if (name === 'gmail_create_draft' || name === 'gmail_send_draft') return true;
+  if (name === 'calendar_create_event') return true;
   if (!name.startsWith('computer_')) return false;
   return !['snapshot', 'read', 'list', 'status', 'screenshot'].some((word) =>
     name.includes(word),

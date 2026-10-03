@@ -6,6 +6,9 @@ import type {
   VoiceTransportSession,
 } from './types';
 
+// Expressive TTS tags such as [cheerful] are for the voice, not the transcript.
+const audioTags = /\[[a-z][a-z ]{0,30}\]\s*/gi;
+
 export async function connectElevenLabs(
   threadId: string,
   stream: MediaStream,
@@ -51,8 +54,9 @@ export async function connectElevenLabs(
     onAgentToolRequest: () => {
       if (!callbacks.isCancelled()) callbacks.onPhase('thinking');
     },
-    onMessage: ({ role, message }) => {
+    onMessage: ({ role, message: raw }) => {
       if (callbacks.isCancelled()) return;
+      const message = raw.replace(audioTags, '').trim();
       if (role === 'user') {
         callbacks.onUserCaption(message);
         callbacks.onTranscript(`You: ${message}`);

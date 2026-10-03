@@ -161,6 +161,9 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
   app.get('/voice/calls/:id', (c) =>
     c.json(platform.workspace.call(c.req.param('id'))),
   );
+  app.get('/voice/calls/:id/progress', (c) =>
+    c.json({ items: voice.progress(c.req.param('id')) }),
+  );
   app.post('/voice/calls/:id/active', (c) =>
     c.json(voice.activate(c.req.param('id'))),
   );
