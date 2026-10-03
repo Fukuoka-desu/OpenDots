@@ -44,6 +44,7 @@
 }
 .sec-empty-face {
   width: 96px;
+  height: 96px;
   border-radius: 50%;
   box-shadow: 0 0 0 3px rgba(61, 123, 255, 0.5);
   animation: sec-breathe 3s ease-in-out infinite;
@@ -120,6 +121,7 @@
 .sec-top-tools select,
 .sec-top-tools button {
   display: inline-flex;
+  white-space: nowrap;
   align-items: center;
   gap: 4px;
   padding: 3px 9px;
@@ -137,9 +139,43 @@
   grid-area: stage;
   position: relative;
   overflow: hidden;
-  background: #06080f;
+  background: radial-gradient(ellipse at 50% 42%, #0f1d42 0%, #06080f 72%);
 }
-.sec-photo,
+.sec-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(120, 150, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 150, 255, 0.07) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse at 50% 44%, #000 25%, transparent 72%);
+}
+.sec-wave-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+}
+.avatar-on .sec-wave-canvas {
+  opacity: 0;
+}
+.sec-ai-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3d7bff, #22d3ee);
+  color: #fff;
+  box-shadow: 0 0 14px rgba(61, 123, 255, 0.45);
+}
+.sec-msg.voice .sec-bubble {
+  border-style: dashed;
+}
 .sec-video {
   position: absolute;
   inset: 0;
@@ -147,12 +183,6 @@
   height: 100%;
   object-fit: cover;
   object-position: 42% 30%;
-}
-.sec-photo {
-  background: url('/secretary.webp') 42% 30% / cover no-repeat;
-  transform-origin: 45% 40%;
-  animation: sec-breathe 5.5s ease-in-out infinite;
-  filter: brightness(calc(0.94 + var(--out) * 0.2));
 }
 .sec-video {
   opacity: 0;
@@ -168,14 +198,6 @@
 .sec-keyed {
   z-index: 2;
   object-position: 50% 15%;
-}
-.avatar-on .sec-photo {
-  background: url('/stage-office.webp') center / cover no-repeat;
-  animation: none;
-  filter: brightness(1.35) saturate(1.1);
-}
-.phase-speaking .sec-photo {
-  animation-duration: 2.8s;
 }
 .sec-stage::after {
   content: '';
