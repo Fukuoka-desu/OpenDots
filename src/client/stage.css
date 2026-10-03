@@ -162,6 +162,18 @@
 .sec-video.ready {
   opacity: 1;
 }
+.sec-source.ready:not(.raw) {
+  opacity: 0;
+}
+.sec-keyed {
+  z-index: 2;
+  object-position: 50% 15%;
+}
+.avatar-on .sec-photo {
+  background: url('/stage-office.webp') center / cover no-repeat;
+  animation: none;
+  filter: brightness(1.35) saturate(1.1);
+}
 .phase-speaking .sec-photo {
   animation-duration: 2.8s;
 }
