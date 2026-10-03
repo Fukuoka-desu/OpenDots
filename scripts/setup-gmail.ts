@@ -6,6 +6,7 @@ const redirectUri = 'http://127.0.0.1:53682/';
 const gmailScopes = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.compose',
+  'https://www.googleapis.com/auth/calendar.events',
 ].join(' ');
 
 export function buildConsentUrl(clientId: string) {

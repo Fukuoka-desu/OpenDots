@@ -1,14 +1,8 @@
 import { defineTool } from '@copilotkit/runtime/v2';
 import { z } from 'zod';
+import { GoogleAuth, type GoogleAuthConfig } from './google-auth.js';
 
-const oauthTokenUrl = 'https://oauth2.googleapis.com/token';
 const gmailApiUrl = 'https://gmail.googleapis.com/gmail/v1/users/me';
-
-type GmailConfig = {
-  clientId?: string;
-  clientSecret?: string;
-  refreshToken?: string;
-};
 
 type GmailMessage = {
   id: string;
@@ -111,101 +105,23 @@ function messageFields(resource: GmailMessageResource): GmailMessage {
 }
 
 export class GmailClient {
-  private accessTokenValue?: string;
-  private accessTokenExpiresAt = 0;
+  private auth: GoogleAuth;
 
-  constructor(private config: GmailConfig) {}
+  constructor(auth: GoogleAuth | GoogleAuthConfig) {
+    this.auth = auth instanceof GoogleAuth ? auth : new GoogleAuth(auth);
+  }
 
   get configured() {
-    return !!(
-      this.config.clientId &&
-      this.config.clientSecret &&
-      this.config.refreshToken
-    );
-  }
-
-  private redact(value: string) {
-    return [
-      this.config.clientSecret,
-      this.config.refreshToken,
-      this.accessTokenValue,
-    ]
-      .filter((secret): secret is string => !!secret)
-      .reduce(
-        (message, secret) =>
-          message
-            .replaceAll(secret, '[redacted]')
-            .replaceAll(encodeURIComponent(secret), '[redacted]'),
-        value,
-      );
-  }
-
-  private async responseJson(
-    response: Response,
-    service: 'Google OAuth' | 'Gmail API',
-  ): Promise<GmailApiResponse> {
-    const payload: unknown = await response.json().catch(() => undefined);
-    if (!response.ok) {
-      const errorMessage =
-        isRecord(payload) &&
-        isRecord(payload.error) &&
-        typeof payload.error.message === 'string'
-          ? payload.error.message
-          : isRecord(payload) && typeof payload.error_description === 'string'
-            ? payload.error_description
-            : isRecord(payload) && typeof payload.error === 'string'
-              ? payload.error
-              : response.statusText || 'Unknown error';
-      throw new Error(
-        `${service} returned HTTP ${response.status}: ${this.redact(errorMessage)}`,
-      );
-    }
-    if (!isRecord(payload))
-      throw new Error(`${service} returned an invalid response.`);
-    return payload;
-  }
-
-  private async accessToken() {
-    if (!this.configured)
-      throw new Error('Gmail is not configured with OAuth credentials.');
-    if (this.accessTokenValue && Date.now() < this.accessTokenExpiresAt)
-      return this.accessTokenValue;
-
-    const response = await fetch(oauthTokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: this.config.clientId!,
-        client_secret: this.config.clientSecret!,
-        refresh_token: this.config.refreshToken!,
-        grant_type: 'refresh_token',
-      }),
-    });
-    const payload = await this.responseJson(response, 'Google OAuth');
-    if (
-      typeof payload.access_token !== 'string' ||
-      !payload.access_token ||
-      typeof payload.expires_in !== 'number'
-    )
-      throw new Error('Google OAuth did not return a valid access token.');
-    this.accessTokenValue = payload.access_token;
-    this.accessTokenExpiresAt =
-      Date.now() + Math.max(0, payload.expires_in - 60) * 1000;
-    return this.accessTokenValue;
+    return this.auth.configured;
   }
 
   private async api(
     path: string,
     init: RequestInit = {},
   ): Promise<GmailApiResponse> {
-    const token = await this.accessToken();
-    const headers = new Headers(init.headers);
-    headers.set('Authorization', `Bearer ${token}`);
-    const response = await fetch(`${gmailApiUrl}${path}`, {
-      ...init,
-      headers,
-    });
-    return this.responseJson(response, 'Gmail API');
+    if (!this.configured)
+      throw new Error('Gmail is not configured with OAuth credentials.');
+    return this.auth.request<GmailApiResponse>(`${gmailApiUrl}${path}`, init);
   }
 
   private async getMessage(id: string, format: 'metadata' | 'full') {
