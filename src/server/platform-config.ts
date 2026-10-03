@@ -22,6 +22,10 @@ export interface PlatformConfig extends WebConfig {
   voiceProvider?: 'openai' | 'gemini' | 'elevenlabs';
   elevenlabsAgentId?: string;
   voiceName?: string;
+  liveAvatarApiKey?: string;
+  liveAvatarAvatarId?: string;
+  liveAvatarElevenLabsSecretId?: string;
+  liveAvatarSandbox?: boolean;
   slackChannel?: string;
   slackTeam?: string;
   slackUsers: string[];
@@ -58,12 +62,18 @@ export function setupStatus(
       : (config.voiceProvider === 'openai' ||
           config.voiceProvider === 'gemini') &&
         !!config.voiceModel);
+  const avatarConfigured =
+    config.voiceProvider === 'elevenlabs' &&
+    !!config.liveAvatarApiKey &&
+    !!config.liveAvatarElevenLabsSecretId &&
+    (!!config.liveAvatarAvatarId || !!config.liveAvatarSandbox);
   return {
     intelligence: !!config.intelligenceKey,
     model: !!(config.apiKey && config.model),
     judge: !!config.judgeKey,
     browser: !!(config.browserUrl && config.browserSecret),
     voice: voiceConfigured && !missing.length,
+    avatar: avatarConfigured,
     voiceProvider: config.voiceProvider ?? 'openai',
     slack,
     missing,

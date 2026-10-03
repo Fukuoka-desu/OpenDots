@@ -47,6 +47,11 @@ function fixture(configOverrides: Partial<PlatformConfig> = {}) {
       requireReady() {},
       setup: () => ({
         voice: true,
+        avatar:
+          config.voiceProvider === 'elevenlabs' &&
+          !!config.liveAvatarApiKey &&
+          !!config.liveAvatarElevenLabsSecretId &&
+          (!!config.liveAvatarAvatarId || !!config.liveAvatarSandbox),
         intelligence: true,
         model: true,
         judge: false,
@@ -292,6 +297,105 @@ it('creates an ElevenLabs signed URL and returns conversation overrides', async 
       tts: { voiceId: 'voice-id' },
     },
   });
+});
+it('creates a LiveAvatar LITE session token for the ElevenLabs agent', async () => {
+  const f = fixture({
+    voiceProvider: 'elevenlabs',
+    elevenlabsAgentId: 'agent-id',
+    voiceName: 'voice-id',
+    liveAvatarApiKey: 'liveavatar-secret',
+    liveAvatarAvatarId: 'avatar-id',
+    liveAvatarElevenLabsSecretId: 'elevenlabs-secret-id',
+  });
+  f.transport.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        code: 100,
+        data: { session_id: 'session-id', session_token: 'session-token' },
+        message: 'success',
+      }),
+      { headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+
+  const call = await f.voice.begin(
+    'thread',
+    undefined,
+    new AbortController().signal,
+  );
+  const [url, init] = f.transport.mock.calls[0]!;
+
+  expect(String(url)).toBe('https://api.liveavatar.com/v1/sessions/token');
+  expect(init?.method).toBe('POST');
+  expect(new Headers(init?.headers).get('X-API-KEY')).toBe('liveavatar-secret');
+  expect(init?.redirect).toBe('error');
+  expect(JSON.parse(String(init?.body))).toEqual({
+    mode: 'LITE',
+    avatar_id: 'avatar-id',
+    elevenlabs_agent_config: {
+      secret_id: 'elevenlabs-secret-id',
+      agent_id: 'agent-id',
+      voice_id: 'voice-id',
+    },
+  });
+  expect(call).toMatchObject({
+    id: expect.any(String),
+    provider: 'elevenlabs',
+    avatar: { sessionToken: 'session-token' },
+    context: expect.stringContaining('same language'),
+  });
+});
+it('forces the LiveAvatar sandbox avatar and flag', async () => {
+  const f = fixture({
+    voiceProvider: 'elevenlabs',
+    elevenlabsAgentId: 'agent-id',
+    liveAvatarApiKey: 'liveavatar-secret',
+    liveAvatarAvatarId: 'ignored-avatar-id',
+    liveAvatarElevenLabsSecretId: 'elevenlabs-secret-id',
+    liveAvatarSandbox: true,
+  });
+  f.transport.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        code: 100,
+        data: { session_id: 'session-id', session_token: 'session-token' },
+        message: 'success',
+      }),
+      { headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+
+  await f.voice.begin('thread', undefined, new AbortController().signal);
+
+  const [, init] = f.transport.mock.calls[0]!;
+  expect(JSON.parse(String(init?.body))).toMatchObject({
+    mode: 'LITE',
+    avatar_id: 'dd73ea75-1218-4ef3-92ce-606d5f7fbc0a',
+    is_sandbox: true,
+    elevenlabs_agent_config: {
+      secret_id: 'elevenlabs-secret-id',
+      agent_id: 'agent-id',
+    },
+  });
+});
+it('rejects LiveAvatar session-token responses without the documented data envelope', async () => {
+  const f = fixture({
+    voiceProvider: 'elevenlabs',
+    elevenlabsAgentId: 'agent-id',
+    liveAvatarApiKey: 'liveavatar-secret',
+    liveAvatarAvatarId: 'avatar-id',
+    liveAvatarElevenLabsSecretId: 'elevenlabs-secret-id',
+  });
+  f.transport.mockResolvedValueOnce(
+    new Response(JSON.stringify({ session_token: 'session-token' }), {
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+
+  await expect(
+    f.voice.begin('thread', undefined, new AbortController().signal),
+  ).rejects.toThrow('Voice provider returned an invalid session token.');
+  expect(f.workspace.calls()[0].status).toBe('failed');
 });
 it('requires an SDP offer for OpenAI before contacting the provider', async () => {
   const f = fixture({ voiceProvider: 'openai' });

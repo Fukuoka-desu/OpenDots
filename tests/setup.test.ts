@@ -87,6 +87,29 @@ it('checks voice readiness against each selected provider configuration', () => 
     }).voice,
   ).toBe(false);
 });
+it('reports avatar readiness only for complete LiveAvatar ElevenLabs configuration', () => {
+  const elevenLabs = {
+    ...config,
+    voiceProvider: 'elevenlabs' as const,
+    voiceKey: 'fixture',
+    elevenlabsAgentId: 'agent',
+    liveAvatarApiKey: 'liveavatar-key',
+    liveAvatarElevenLabsSecretId: 'secret-id',
+  };
+  expect(
+    setupStatus({ ...elevenLabs, liveAvatarAvatarId: 'avatar-id' }).avatar,
+  ).toBe(true);
+  expect(setupStatus({ ...elevenLabs, liveAvatarSandbox: true }).avatar).toBe(
+    true,
+  );
+  expect(
+    setupStatus({ ...elevenLabs, liveAvatarElevenLabsSecretId: undefined })
+      .avatar,
+  ).toBe(false);
+  expect(setupStatus({ ...elevenLabs, voiceProvider: 'openai' }).avatar).toBe(
+    false,
+  );
+});
 it('reports whether optional Jev judgments are configured', () => {
   expect(setupStatus(config).judge).toBe(false);
   expect(setupStatus({ ...config, judgeKey: 'fixture' }).judge).toBe(true);

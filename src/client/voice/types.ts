@@ -13,6 +13,12 @@ export type VoiceCallResponse =
   | {
       id: string;
       provider: 'elevenlabs';
+      avatar: { sessionToken: string };
+      context: string;
+    }
+  | {
+      id: string;
+      provider: 'elevenlabs';
       signedUrl: string;
       overrides: {
         agent: { prompt: { prompt: string } };
@@ -30,6 +36,7 @@ export type VoiceCallbacks = {
   onCaptionReset: () => void;
   onUserCaption: (text: string) => void;
   onTranscript: (line: string) => void;
+  onAvatarReady?: (ready: boolean) => void;
   onError: (message: string) => void;
   onClosed: () => void;
   compute: (toolCallId: string, request: string) => Promise<string>;
@@ -38,6 +45,7 @@ export type VoiceCallbacks = {
 export type VoiceTransportSession = {
   setMicMuted: (muted: boolean) => void;
   setSpeakerMuted: (muted: boolean) => void;
+  attachAvatarVideo?: (element: HTMLVideoElement | null) => void;
   getLevels: () => { input: number; output: number };
   close: () => void | Promise<void>;
 };

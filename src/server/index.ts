@@ -56,6 +56,10 @@ const config: PlatformConfig = {
   voiceModel: process.env.VOICE_MODEL,
   voiceProvider,
   elevenlabsAgentId: process.env.ELEVENLABS_AGENT_ID,
+  liveAvatarApiKey: process.env.LIVEAVATAR_API_KEY,
+  liveAvatarAvatarId: process.env.LIVEAVATAR_AVATAR_ID,
+  liveAvatarElevenLabsSecretId: process.env.LIVEAVATAR_ELEVENLABS_SECRET_ID,
+  liveAvatarSandbox: process.env.LIVEAVATAR_SANDBOX === '1',
   voiceName:
     process.env.VOICE_NAME ??
     (voiceProvider === 'openai'
