@@ -7,6 +7,7 @@ export interface PlatformConfig extends WebConfig {
   model?: string;
   judgeKey?: string;
   judgeModel?: string;
+  judgeGateway?: boolean;
   heavyModel?: string;
   apiKey?: string;
   baseUrl: string;

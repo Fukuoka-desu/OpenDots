@@ -42,7 +42,7 @@ The model environment variable names follow the configured provider adapter. Pro
 
 ## Judgments (TypeSafe Jev)
 
-Optionally set `TYPESAFE_API_KEY` to enable Jev judgments. `TYPESAFE_MODEL` selects the Jev model (default `jev-latest`); `OPENAI_HEAVY_MODEL` enables routing to a heavier OpenAI-compatible model when Jev scores a request as hard (score 2 or higher), or moderate with confidence below 0.6. Leave it empty to disable model routing.
+Optionally set `TYPESAFE_API_KEY` to enable Jev judgments. `TYPESAFE_MODEL` selects the direct TypeSafe model (default `jev-latest`); `OPENAI_HEAVY_MODEL` enables routing to a heavier OpenAI-compatible model when Jev scores a request as hard (score 2 or higher), or moderate with confidence below 0.6. Leave it empty to disable model routing. A Vercel AI Gateway key with the `vck_` prefix also works in `TYPESAFE_API_KEY` or `AI_GATEWAY_API_KEY`; gateway requests use `typesafe-ai/jev` and require paid credits.
 
 Jev also checks whether side-effecting page/computer tool calls match the latest user request (calls scoring below 0.15 are blocked) and whether a voice-call compute request asks for a forbidden action (scores of 0.85 or higher are declined). These judgments fail open when Jev is unconfigured or unavailable. Jev is a typed judgment model, not a reply generator: it returns choices, scores, and probabilities, never user-facing replies.
 

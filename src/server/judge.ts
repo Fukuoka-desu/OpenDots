@@ -50,16 +50,53 @@ function matchesAnswer(
   );
 }
 
+function normalizeGatewayResponse(value: unknown): unknown {
+  if (!isRecord(value) || !isRecord(value.answers)) return value;
+  const typesafe = isRecord(value.providerMetadata)
+    ? value.providerMetadata.typesafe
+    : undefined;
+  const confidence =
+    isRecord(typesafe) && isRecord(typesafe.confidence)
+      ? typesafe.confidence
+      : undefined;
+  const answers = Object.fromEntries(
+    Object.entries(value.answers).map(([key, answer]) => {
+      if (!isRecord(answer)) return [key, answer];
+      if (answer.type === 'boolean')
+        return [key, { type: 'noul', noul: answer.probability }];
+      if (answer.type !== 'choice' && answer.type !== 'score')
+        return [key, answer];
+      return [
+        key,
+        {
+          ...answer,
+          confidence:
+            typeof confidence?.[key] === 'number' ? confidence[key] : 1,
+          probabilities: answer.probabilities ?? {},
+        },
+      ];
+    }),
+  );
+  return { ...value, answers };
+}
+
 export class Judge {
   private judgeKey?: string;
   private judgeModel?: string;
+  private judgeGateway: boolean;
 
   constructor(
-    config: { judgeKey?: string; judgeModel?: string },
+    config: {
+      judgeKey?: string;
+      judgeModel?: string;
+      judgeGateway?: boolean;
+    },
     private fetcher: typeof fetch = fetch,
   ) {
     this.judgeKey = config.judgeKey;
     this.judgeModel = config.judgeModel;
+    this.judgeGateway =
+      !!config.judgeGateway || !!config.judgeKey?.startsWith('vck_');
   }
 
   get configured(): boolean {
@@ -75,27 +112,55 @@ export class Judge {
     const timeout = AbortSignal.timeout(3000);
     const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
     try {
-      const response = await this.fetcher(
-        'https://api.typesafe.ai/v1/systemone',
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.judgeKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            state,
-            model: this.judgeModel ?? 'jev-latest',
-            questions,
-          }),
-          signal: requestSignal,
-        },
-      );
+      const endpoint = this.judgeGateway
+        ? 'https://ai-gateway.vercel.sh/v4/ai/evaluation-model'
+        : 'https://api.typesafe.ai/v1/systemone';
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${this.judgeKey}`,
+        'Content-Type': 'application/json',
+      };
+      const requestQuestions = this.judgeGateway
+        ? Object.fromEntries(
+            (Object.keys(questions) as K[]).map((key) => {
+              const question = questions[key];
+              return [
+                key,
+                question.type === 'noul'
+                  ? { type: 'boolean', instructions: question.instructions }
+                  : question,
+              ];
+            }),
+          )
+        : questions;
+      let body: Record<string, unknown>;
+      if (this.judgeGateway) {
+        headers['ai-gateway-protocol-version'] = '0.0.1';
+        headers['ai-evaluation-model-specification-version'] = '4';
+        headers['ai-model-id'] = this.judgeModel?.includes('/')
+          ? this.judgeModel
+          : 'typesafe-ai/jev';
+        body = { state, questions: requestQuestions };
+      } else {
+        body = {
+          state,
+          model: this.judgeModel ?? 'jev-latest',
+          questions: requestQuestions,
+        };
+      }
+      const response = await this.fetcher(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: requestSignal,
+      });
       if (!response.ok) {
         console.warn(`Jev judgment unavailable: HTTP ${response.status}`);
         return undefined;
       }
-      const responseBody: unknown = await response.json();
+      const parsedBody: unknown = await response.json();
+      const responseBody = this.judgeGateway
+        ? normalizeGatewayResponse(parsedBody)
+        : parsedBody;
       if (!isRecord(responseBody) || !isRecord(responseBody.answers))
         throw new Error('Invalid Jev response.');
       const answers = {} as Record<K, JudgeAnswer>;

@@ -20,6 +20,17 @@ function response(answers: Record<string, unknown>, status = 200) {
   });
 }
 
+function gatewayResponse(
+  answers: Record<string, unknown>,
+  providerMetadata?: Record<string, unknown>,
+  status = 200,
+) {
+  return new Response(JSON.stringify({ answers, providerMetadata }), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 function judgeForAnswers(answers: Record<string, unknown>) {
   const fetcher = vi.fn<typeof fetch>(async () => response(answers));
   return {
@@ -294,4 +305,119 @@ it('extracts the latest user string or text parts and truncates to 4000 characte
   expect(
     latestUserText([{ role: 'user', content: 'x'.repeat(5000) }]),
   ).toHaveLength(4000);
+});
+
+it('uses the gateway evaluation protocol for vck_ keys and explicit gateway mode', async () => {
+  const question = {
+    forbidden: { type: 'noul', instructions: 'Check for payment.' },
+  } satisfies Record<string, JudgeQuestion>;
+  const state = 'Pay this invoice.';
+  const cases = [
+    {
+      config: { judgeKey: 'vck_test', judgeModel: 'jev-latest' },
+      expectedModel: 'typesafe-ai/jev',
+    },
+    {
+      config: {
+        judgeKey: 'gateway-key',
+        judgeGateway: true,
+        judgeModel: 'custom-provider/jev',
+      },
+      expectedModel: 'custom-provider/jev',
+    },
+  ];
+
+  for (const { config, expectedModel } of cases) {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      gatewayResponse({
+        forbidden: { type: 'boolean', probability: 0.95 },
+      }),
+    );
+    const judge = new Judge(config, fetcher);
+
+    await expect(judge.ask(state, question)).resolves.toEqual({
+      forbidden: { type: 'noul', noul: 0.95 },
+    });
+
+    const [url, init] = fetcher.mock.calls[0]!;
+    const headers = new Headers(init?.headers);
+    expect(String(url)).toBe(
+      'https://ai-gateway.vercel.sh/v4/ai/evaluation-model',
+    );
+    expect(headers.get('Authorization')).toBe(`Bearer ${config.judgeKey}`);
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(headers.get('ai-gateway-protocol-version')).toBe('0.0.1');
+    expect(headers.get('ai-evaluation-model-specification-version')).toBe('4');
+    expect(headers.get('ai-model-id')).toBe(expectedModel);
+    const body = JSON.parse(String(init?.body));
+    expect(body).toEqual({
+      state,
+      questions: {
+        forbidden: { type: 'boolean', instructions: 'Check for payment.' },
+      },
+    });
+    expect(body).not.toHaveProperty('model');
+  }
+});
+
+it('normalizes gateway boolean, choice, and score answers with optional metadata', async () => {
+  const questions = {
+    forbidden: { type: 'noul', instructions: 'Check for payment.' },
+    route: {
+      type: 'choice',
+      instructions: 'Choose a route.',
+      criteria: { technical: 'Technical', simple: 'Simple' },
+    },
+    difficulty: {
+      type: 'score',
+      instructions: 'Score difficulty.',
+      criteria: ['Simple', 'Moderate', 'Hard'],
+    },
+  } satisfies Record<string, JudgeQuestion>;
+  const fetcher = vi.fn<typeof fetch>(async () =>
+    gatewayResponse(
+      {
+        forbidden: { type: 'boolean', probability: 0.95 },
+        route: { type: 'choice', choice: 'technical' },
+        difficulty: {
+          type: 'score',
+          score: 2,
+          probabilities: { '0': 0, '1': 0, '2': 1 },
+        },
+      },
+      { typesafe: { confidence: { route: 0.78 } } },
+    ),
+  );
+  const judge = new Judge({ judgeKey: 'vck_test' }, fetcher);
+
+  await expect(judge.ask('state', questions)).resolves.toEqual({
+    forbidden: { type: 'noul', noul: 0.95 },
+    route: {
+      type: 'choice',
+      choice: 'technical',
+      confidence: 0.78,
+      probabilities: {},
+    },
+    difficulty: {
+      type: 'score',
+      score: 2,
+      confidence: 1,
+      probabilities: { '0': 0, '1': 0, '2': 1 },
+    },
+  });
+});
+
+it('fails open with the gateway HTTP status', async () => {
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const fetcher = vi.fn<typeof fetch>(async () =>
+    gatewayResponse({}, undefined, 403),
+  );
+  const judge = new Judge({ judgeKey: 'vck_test' }, fetcher);
+
+  await expect(
+    judge.ask('state', {
+      forbidden: { type: 'noul', instructions: 'Check for payment.' },
+    }),
+  ).resolves.toBeUndefined();
+  expect(warning).toHaveBeenCalledWith('Jev judgment unavailable: HTTP 403');
 });
