@@ -114,6 +114,24 @@ it('reports whether optional Jev judgments are configured', () => {
   expect(setupStatus(config).judge).toBe(false);
   expect(setupStatus({ ...config, judgeKey: 'fixture' }).judge).toBe(true);
 });
+it('reports Gmail as configured only when all OAuth credentials are present', () => {
+  expect(setupStatus(config).mail).toBe(false);
+  expect(
+    setupStatus({
+      ...config,
+      gmailClientId: 'client-id',
+      gmailClientSecret: 'client-secret',
+      gmailRefreshToken: 'refresh-token',
+    }).mail,
+  ).toBe(true);
+  expect(
+    setupStatus({
+      ...config,
+      gmailClientId: 'client-id',
+      gmailClientSecret: 'client-secret',
+    }).mail,
+  ).toBe(false);
+});
 it('reports activation failure until the SDK recovers online', () => {
   const declared = {
     ...config,

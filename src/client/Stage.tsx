@@ -568,7 +568,9 @@ function StageRoom({
             <dt>
               <Database size={14} /> Action:
             </dt>
-            <dd className={setup.browser ? 'ok' : ''}>Browser / Tools</dd>
+            <dd className={setup.browser || setup.mail ? 'ok' : ''}>
+              Browser / Tools{setup.mail ? ' / Gmail' : ''}
+            </dd>
           </dl>
         </header>
         <div className="sec-log">

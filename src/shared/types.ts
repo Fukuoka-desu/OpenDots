@@ -106,6 +106,7 @@ export interface SetupStatus {
   model: boolean;
   judge: boolean;
   browser: boolean;
+  mail: boolean;
   voice: boolean;
   avatar: boolean;
   voiceProvider: 'openai' | 'gemini' | 'elevenlabs';

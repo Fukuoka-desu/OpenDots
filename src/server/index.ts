@@ -60,6 +60,9 @@ const config: PlatformConfig = {
   liveAvatarAvatarId: process.env.LIVEAVATAR_AVATAR_ID,
   liveAvatarElevenLabsSecretId: process.env.LIVEAVATAR_ELEVENLABS_SECRET_ID,
   liveAvatarSandbox: process.env.LIVEAVATAR_SANDBOX === '1',
+  gmailClientId: process.env.GMAIL_CLIENT_ID,
+  gmailClientSecret: process.env.GMAIL_CLIENT_SECRET,
+  gmailRefreshToken: process.env.GMAIL_REFRESH_TOKEN,
   voiceName:
     process.env.VOICE_NAME ??
     (voiceProvider === 'openai'

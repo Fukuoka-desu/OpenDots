@@ -71,6 +71,12 @@ npm run browser
 
 Use the same secret on the app and browser processes. Browser navigation is read-only with JavaScript disabled. Private addresses, redirects, and authenticated pages are unsupported; provide a canonical public URL. This is a bounded research tool, not a general desktop or shell.
 
+## Gmail
+
+Enable the Gmail API in Google Cloud, configure the OAuth consent screen, and create an OAuth client ID for a **Desktop app**. Use an Internal audience for an eligible Workspace organization; External apps left in Testing must add the owner as a test user, and Gmail scopes cause refresh tokens to expire after seven days. Set `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` in `.env`.
+
+Run `npm run setup:gmail` to print the consent URL, open it, and approve access. Then pass the full redirect URL or its code to `npm run setup:gmail -- '<redirect URL or code>'`. The script stores the refresh token in `.env` and prints only the Gmail account address. The app uses read-only and compose scopes: Gmail tools can search and read messages and create drafts, but never send a newly created draft immediately. The Dot must show recipients, subject, and the full body, then wait for explicit approval in a new message before sending.
+
 ## Persistent Dot computers
 
 For a separate browser, persistent files, and optional shell for each specialist, follow [Computer setup](COMPUTERS.md). This uses pinned OpenBot computer/supervisor services and per-Dot permissions. Parallel research tools remain available alongside configured computer tools. With the browser provider selected, Dots use their computer tools in place of the read-only public-page tool; enable each Dot's required capabilities before use.

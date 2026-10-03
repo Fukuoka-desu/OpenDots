@@ -14,6 +14,7 @@
     "browser": "node --env-file-if-exists=.env --import tsx src/browser/index.ts",
     "browser:start": "node --env-file-if-exists=.env dist/server/browser/index.js",
     "setup:liveavatar": "node --env-file-if-exists=.env --import tsx scripts/setup-liveavatar.ts",
+    "setup:gmail": "node --env-file-if-exists=.env --import tsx scripts/setup-gmail.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests scripts vite.config.ts",
