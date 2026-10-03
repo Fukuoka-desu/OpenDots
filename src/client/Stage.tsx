@@ -32,6 +32,7 @@ import {
   SendHorizontal,
   Settings,
   SquareCheck,
+  SquareTerminal,
   User,
   Users,
   Wrench,
@@ -41,6 +42,7 @@ import type { AudioLevels, LiveDotPhase } from './LiveDot';
 import { isInternalVoiceReceipt } from './ChatTranscript';
 import { useVoice } from './useVoice';
 import { startChromaKey } from './chromaKey';
+import { VoiceWave } from './VoiceWave';
 import type {
   Conversation,
   Dot,
@@ -57,11 +59,18 @@ const clock = new Intl.DateTimeFormat('ja-JP', {
   minute: '2-digit',
 });
 
-type ActionKind = 'calendar' | 'mail' | 'browser' | 'crm' | 'memo' | 'other';
+type ActionKind =
+  'code' | 'calendar' | 'mail' | 'browser' | 'crm' | 'memo' | 'other';
 const actions: Record<
   ActionKind,
   { icon: ReactNode; name: string; base: string; busy: string }
 > = {
+  code: {
+    icon: <SquareTerminal size={20} />,
+    name: 'コード',
+    base: 'コードを実行',
+    busy: '実行中',
+  },
   calendar: {
     icon: <CalendarDays size={20} />,
     name: 'カレンダー',
@@ -99,9 +108,10 @@ const actions: Record<
     busy: '実行中',
   },
 };
-const dockKinds: ActionKind[] = ['calendar', 'mail', 'browser', 'crm', 'memo'];
+const dockKinds: ActionKind[] = ['code', 'mail', 'browser', 'memo', 'calendar'];
 
 function kindOf(tool: string): ActionKind {
+  if (/computer_(exec|files)|shell|terminal|code/i.test(tool)) return 'code';
   if (/calendar|schedule|event|meeting/i.test(tool)) return 'calendar';
   if (/mail|gmail|slack|send_message|reply/i.test(tool)) return 'mail';
   if (/crm|hubspot|salesforce|contact|deal|lead/i.test(tool)) return 'crm';
@@ -115,7 +125,7 @@ function detail(args: string) {
   try {
     const value = JSON.parse(args) as Record<string, unknown>;
     const pick =
-      ['url', 'query', 'title', 'text', 'request', 'subject']
+      ['command', 'path', 'url', 'query', 'title', 'text', 'request', 'subject']
         .map((key) => value[key])
         .find((item) => typeof item === 'string' && item) ??
       Object.values(value).find((item) => typeof item === 'string' && item);
@@ -195,7 +205,9 @@ export function Stage() {
   if (!state || !dot || !thread || !ready)
     return (
       <div className="sec sec-empty">
-        <img className="sec-empty-face" src="/secretary-face.webp" alt="" />
+        <span className="sec-empty-face sec-ai-icon">
+          <AudioLines size={44} />
+        </span>
         <p role={error ? 'alert' : 'status'}>
           {error ||
             (state && !ready
@@ -371,11 +383,9 @@ function StageRoom({
             !!item.toolCalls?.length))),
   );
   const live = voice.status === 'active';
-  const caption =
-    voice.phase === 'speaking' ? voice.caption : voice.userCaption;
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'end' });
-  }, [lines.length, running, voice.caption, voice.userCaption]);
+  }, [lines.length, running, voice.turns.length, voice.phase]);
 
   const send = async () => {
     const text = draft.trim();
@@ -442,7 +452,7 @@ function StageRoom({
         className={`sec-stage ${voice.avatarReady ? 'avatar-on' : ''}`}
         aria-label="AI秘書"
       >
-        <div className="sec-photo" role="img" aria-label="スーツ姿のAI秘書" />
+        <VoiceWave phase={phase} getLevels={voice.getLevels} />
         <video
           className={`sec-video sec-source ${voice.avatarReady ? 'ready' : ''}`}
           ref={avatarVideo}
@@ -465,11 +475,6 @@ function StageRoom({
           </p>
           <small>Jevが判断する、あなただけのAI秘書</small>
         </div>
-        {live && caption && (
-          <p className="sec-caption" aria-live="polite">
-            {caption}
-          </p>
-        )}
         <div className="sec-actions">
           <h3>実行中のアクション</h3>
           <ul>
@@ -585,7 +590,9 @@ function StageRoom({
               </div>
             ) : (
               <div key={item.id} className="sec-msg ai">
-                <img src="/secretary-face.webp" alt="" />
+                <span className="sec-ai-icon">
+                  <AudioLines size={16} />
+                </span>
                 <div>
                   <p className="sec-meta">
                     AI秘書 <time>{seenAt(item.id)}</time>
@@ -635,18 +642,35 @@ function StageRoom({
               </div>
             ),
           )}
-          {live && voice.userCaption && voice.phase !== 'speaking' && (
-            <div className="sec-msg you pending">
-              <p className="sec-bubble">{voice.userCaption}</p>
-            </div>
+          {voice.turns.map((turn) =>
+            turn.role === 'you' ? (
+              <div key={`turn-${turn.id}`} className="sec-msg you voice">
+                <p className="sec-meta">
+                  <span className="sec-you-icon">
+                    <Mic size={13} />
+                  </span>
+                  あなた（音声）
+                </p>
+                <p className="sec-bubble">{turn.text}</p>
+              </div>
+            ) : (
+              <div key={`turn-${turn.id}`} className="sec-msg ai voice">
+                <span className="sec-ai-icon">
+                  <AudioLines size={16} />
+                </span>
+                <div>
+                  <p className="sec-meta">AI秘書（音声）</p>
+                  <p className="sec-bubble">{turn.text}</p>
+                </div>
+              </div>
+            ),
           )}
-          {(running || (live && voice.phase !== 'listening')) && (
+          {(running || (live && voice.phase === 'thinking')) && (
             <div className="sec-msg ai pending">
-              <img src="/secretary-face.webp" alt="" />
+              <span className="sec-ai-icon">
+                <AudioLines size={16} />
+              </span>
               <div>
-                {live && voice.phase === 'speaking' && voice.caption ? (
-                  <p className="sec-bubble">{voice.caption}</p>
-                ) : null}
                 <p className="sec-typing">
                   <Bars count={6} className="sec-mini-wave" />
                   <span className="sec-dots">

@@ -42,6 +42,9 @@ export function useVoice(
   );
   const [caption, setCaption] = useState('');
   const [userCaption, setUserCaption] = useState('');
+  const [turns, setTurns] = useState<
+    { id: number; role: 'you' | 'ai'; text: string }[]
+  >([]);
   const session = useRef<VoiceCallSession | undefined>(undefined);
   const video = useRef<HTMLVideoElement | null>(null);
   const [avatarReady, setAvatarReady] = useState(false);
@@ -148,6 +151,7 @@ export function useVoice(
     setCaption('');
     setUserCaption('');
     setAvatarReady(false);
+    setTurns([]);
     let stream: MediaStream | undefined;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -194,7 +198,12 @@ export function useVoice(
         onCaption: (text) => setCaption((value) => value + text),
         onCaptionReset: () => setCaption(''),
         onUserCaption: setUserCaption,
-        onTranscript: (line) => current.transcript.push(line),
+        onTranscript: (line) => {
+          current.transcript.push(line);
+          const role = line.startsWith('You: ') ? 'you' : 'ai';
+          const text = line.replace(/^(You|Dot): /, '');
+          setTurns((list) => [...list, { id: list.length, role, text }]);
+        },
         onAvatarReady: setAvatarReady,
         onError: setError,
         onClosed: () => {
@@ -309,6 +318,7 @@ export function useVoice(
     phase,
     caption,
     userCaption,
+    turns,
     toggleMute,
     toggleSpeaker,
     getLevels,
