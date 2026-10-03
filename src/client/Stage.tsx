@@ -110,6 +110,63 @@ const actions: Record<
 };
 const dockKinds: ActionKind[] = ['code', 'mail', 'browser', 'memo', 'calendar'];
 
+type Demo = { label: string; prompt: string; needs?: 'mail' };
+const demos: Demo[] = [
+  {
+    label: 'ニュース調査',
+    prompt:
+      '今日のAI業界の主要ニュースを3つ調べて、出典URL付きで要点を短くまとめて。',
+  },
+  {
+    label: 'サイト要約',
+    prompt:
+      'https://news.ycombinator.com を開いて、いま話題の記事トップ5を日本語で要約して。',
+  },
+  {
+    label: 'データ分析',
+    prompt:
+      'あなたのコンピューターで、架空の月次売上データ（12か月分・商品3種類）をCSVで作り、Pythonで月別合計・商品別合計・前月比を集計して、結果を表で見せて。',
+  },
+  {
+    label: 'コーディング',
+    prompt:
+      'あなたのコンピューターで、1〜30のFizzBuzzを出力するPythonプログラムを書いて実行し、コードと実行結果を見せて。',
+  },
+  {
+    label: '議事メモ',
+    prompt:
+      '次の会話から議事メモ（決定事項・ToDo・担当・期限）を作って、ページとして保存して：「来週の展示会は田中さんがブース設営、佐藤さんがチラシ500部を金曜までに手配。予算は30万円以内で決定。次回定例は月曜10時。」',
+  },
+  {
+    label: 'メール要約',
+    prompt: '受信トレイの最新5件を要約して、返信が必要そうなものを教えて。',
+    needs: 'mail',
+  },
+  {
+    label: '返信の下書き',
+    prompt:
+      '受信トレイで一番新しい、返信が必要そうなメールに丁寧な返信の下書きを作って見せて。まだ送信はしないで。',
+    needs: 'mail',
+  },
+  {
+    label: '競合比較→メール',
+    prompt:
+      'Notion AI と ChatGPT Team の料金と主な機能を調べて比較表にし、その内容で自分宛てのメール下書きを作って見せて。',
+    needs: 'mail',
+  },
+  {
+    label: '今日の予定',
+    prompt: '今日と明日の予定を教えて。',
+    needs: 'mail',
+  },
+  {
+    label: '予定を追加',
+    prompt:
+      '来週月曜の15時から30分、「AI秘書デモ振り返り」という予定をカレンダーに入れて。',
+    needs: 'mail',
+  },
+];
+
 function kindOf(tool: string): ActionKind {
   if (/computer_(exec|files)|shell|terminal|code/i.test(tool)) return 'code';
   if (/calendar|schedule|event|meeting/i.test(tool)) return 'calendar';
@@ -387,11 +444,11 @@ function StageRoom({
     bottom.current?.scrollIntoView({ block: 'end' });
   }, [lines.length, running, voice.turns.length, voice.phase]);
 
-  const send = async () => {
-    const text = draft.trim();
+  const send = async (preset?: string) => {
+    const text = (preset ?? draft).trim();
     if (!text || running || !loaded) return;
     setError('');
-    setDraft('');
+    if (preset === undefined) setDraft('');
     setRunning(true);
     agent.addMessage({ id: crypto.randomUUID(), role: 'user', content: text });
     try {
@@ -609,6 +666,7 @@ function StageRoom({
                         const status = callState(call);
                         const base =
                           actions[kind].base || `${call.function.name} を実行`;
+                        const sent = call.function.name === 'gmail_send_draft';
                         return (
                           <li key={call.id} className={status}>
                             <span className="sec-task-icon">
@@ -617,14 +675,18 @@ function StageRoom({
                             <span>
                               <strong>
                                 {status === 'done'
-                                  ? `${base}しました`
+                                  ? sent
+                                    ? 'メールを送信しました'
+                                    : `${base}しました`
                                   : status === 'busy'
                                     ? `${base}中…`
                                     : `${base}（中断）`}
                               </strong>
                               <small>
-                                {detail(call.function.arguments) ||
-                                  call.function.name}
+                                {sent
+                                  ? '確認済みの下書きを送信'
+                                  : detail(call.function.arguments) ||
+                                    call.function.name}
                               </small>
                             </span>
                             {status === 'done' ? (
@@ -691,6 +753,20 @@ function StageRoom({
             {error || voice.error}
           </p>
         )}
+        <div className="sec-demos" aria-label="デモ">
+          {demos
+            .filter((demo) => !demo.needs || setup[demo.needs])
+            .map((demo) => (
+              <button
+                key={demo.label}
+                type="button"
+                disabled={running || !loaded}
+                onClick={() => void send(demo.prompt)}
+              >
+                {demo.label}
+              </button>
+            ))}
+        </div>
         <form
           className="sec-input"
           onSubmit={(e) => {

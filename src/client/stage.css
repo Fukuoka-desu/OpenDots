@@ -697,6 +697,30 @@
   background: rgba(200, 50, 50, 0.25);
   font-size: 12.5px;
 }
+.sec-demos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 12px 8px;
+}
+.sec-demos button {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #111a31;
+  color: #cfe0ff;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sec-demos button:hover:not(:disabled) {
+  border-color: #3d7bff;
+  background: #16244a;
+}
+.sec-demos button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .sec-input {
   display: flex;
   align-items: center;
