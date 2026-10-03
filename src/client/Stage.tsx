@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   CopilotKitProvider,
   useAgent,
@@ -34,6 +40,7 @@ import { api, authHeaders } from './api';
 import type { AudioLevels, LiveDotPhase } from './LiveDot';
 import { isInternalVoiceReceipt } from './ChatTranscript';
 import { useVoice } from './useVoice';
+import { startChromaKey } from './chromaKey';
 import type {
   Conversation,
   Dot,
@@ -297,6 +304,24 @@ function StageRoom({
     agent.messages.at(-1)?.id,
   );
   useLevelVars(root, voice.getLevels);
+  const keyCanvas = useRef<HTMLCanvasElement>(null);
+  const sourceVideo = useRef<HTMLVideoElement | null>(null);
+  const { avatarVideo: attachAvatarVideo, avatarReady } = voice;
+  const avatarVideo = useCallback(
+    (element: HTMLVideoElement | null) => {
+      sourceVideo.current = element;
+      attachAvatarVideo(element);
+    },
+    [attachAvatarVideo],
+  );
+  useEffect(() => {
+    const video = sourceVideo.current;
+    const canvas = keyCanvas.current;
+    if (!avatarReady || !video || !canvas) return;
+    const stop = startChromaKey(video, canvas);
+    video.classList.toggle('raw', !stop);
+    return stop;
+  }, [avatarReady]);
   useEffect(() => {
     const events = agent.subscribe({
       onRunErrorEvent: ({ event }) => setError(event.message),
@@ -335,8 +360,9 @@ function StageRoom({
     return mine.length && callState(mine.at(-1)!) === 'done' ? 'done' : 'idle';
   };
   const lines = agent.messages.filter(
-    (item): item is Message =>
+    (item, index, all): item is Message =>
       !isInternalVoiceReceipt(item) &&
+      !(index > 0 && isInternalVoiceReceipt(all[index - 1])) &&
       ((item.role === 'user' &&
         typeof item.content === 'string' &&
         !!item.content.trim()) ||
@@ -345,6 +371,8 @@ function StageRoom({
             !!item.toolCalls?.length))),
   );
   const live = voice.status === 'active';
+  const caption =
+    voice.phase === 'speaking' ? voice.caption : voice.userCaption;
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'end' });
   }, [lines.length, running, voice.caption, voice.userCaption]);
@@ -410,13 +438,21 @@ function StageRoom({
         </span>
       </header>
 
-      <section className="sec-stage" aria-label="AI秘書">
+      <section
+        className={`sec-stage ${voice.avatarReady ? 'avatar-on' : ''}`}
+        aria-label="AI秘書"
+      >
         <div className="sec-photo" role="img" aria-label="スーツ姿のAI秘書" />
         <video
-          className={`sec-video ${voice.avatarReady ? 'ready' : ''}`}
-          ref={voice.avatarVideo}
+          className={`sec-video sec-source ${voice.avatarReady ? 'ready' : ''}`}
+          ref={avatarVideo}
           autoPlay
           playsInline
+        />
+        <canvas
+          className={`sec-video sec-keyed ${voice.avatarReady ? 'ready' : ''}`}
+          ref={keyCanvas}
+          aria-hidden
         />
         <div className="sec-glow" aria-hidden />
         <div className="sec-badge">
@@ -429,9 +465,9 @@ function StageRoom({
           </p>
           <small>Jevが判断する、あなただけのAI秘書</small>
         </div>
-        {live && (voice.caption || voice.userCaption) && (
+        {live && caption && (
           <p className="sec-caption" aria-live="polite">
-            {voice.phase === 'speaking' ? voice.caption : voice.userCaption}
+            {caption}
           </p>
         )}
         <div className="sec-actions">
