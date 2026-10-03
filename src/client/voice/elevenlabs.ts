@@ -54,6 +54,7 @@ export async function connectElevenLabs(
         callbacks.onUserCaption(message);
         callbacks.onTranscript(`You: ${message}`);
       } else {
+        callbacks.onCaptionReset();
         callbacks.onCaption(message);
         callbacks.onTranscript(`Dot: ${message}`);
       }

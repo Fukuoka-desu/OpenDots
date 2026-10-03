@@ -8,7 +8,7 @@ import {
   VolumeX,
   Maximize2,
 } from 'lucide-react';
-import { Mascot } from './Mascot';
+import { LiveDot } from './LiveDot';
 import type { Dot } from '../shared/types';
 import type { useVoice } from './useVoice';
 
@@ -61,7 +61,19 @@ export function CallView({
         </button>
       </div>
       <div className={`call-persona ${voice.phase}`}>
-        <Mascot identity={dot.id} name={dot.name} />
+        <LiveDot
+          identity={dot.id}
+          name={dot.name}
+          phase={
+            voice.status === 'connecting'
+              ? 'connecting'
+              : voice.status === 'active'
+                ? voice.phase
+                : 'idle'
+          }
+          getLevels={voice.getLevels}
+          size={170}
+        />
         <h2>{dot.name}</h2>
         <span className="call-timer" aria-label="Call duration">
           {duration}
