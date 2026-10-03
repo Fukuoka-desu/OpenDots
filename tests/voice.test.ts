@@ -56,6 +56,7 @@ function fixture(configOverrides: Partial<PlatformConfig> = {}) {
         model: true,
         judge: false,
         browser: false,
+        mail: false,
         voiceProvider: 'openai',
         slack: 'not_configured',
         missing: [],

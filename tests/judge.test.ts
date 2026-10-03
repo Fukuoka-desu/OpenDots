@@ -238,6 +238,27 @@ it('blocks misaligned page writes and permits aligned writes', async () => {
   expect(allowedExecute).toHaveBeenCalledWith({ value: 'Updated' });
 });
 
+it('checks Gmail draft creation and send tools as side effects', async () => {
+  const blocked = judgeForNoul(0.1);
+  const createDraft = createTool('gmail_create_draft');
+  const sendDraft = createTool('gmail_send_draft');
+  const [verifiedCreateDraft, verifiedSendDraft] = verifyToolCalls(
+    [createDraft, sendDraft],
+    blocked.judge,
+    () => 'Prepare and send an email.',
+  );
+  const blockedMessage =
+    "Verification blocked this tool call because it does not appear to match the user's request. Ask the user to confirm before retrying.";
+
+  await expect(
+    verifiedCreateDraft?.execute?.({ value: 'Draft' }),
+  ).rejects.toThrow(blockedMessage);
+  await expect(
+    verifiedSendDraft?.execute?.({ value: 'draft-id' }),
+  ).rejects.toThrow(blockedMessage);
+  expect(blocked.fetcher).toHaveBeenCalledTimes(2);
+});
+
 it('runs side-effect tools when Jev is unavailable and leaves read-only tools untouched', async () => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   const fetcher = vi.fn<typeof fetch>(async () => {

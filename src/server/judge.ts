@@ -225,6 +225,7 @@ export async function chooseModel(
 
 function isSideEffectTool(name: string) {
   if (name === 'create_space_page' || name === 'edit_space_page') return true;
+  if (name === 'gmail_create_draft' || name === 'gmail_send_draft') return true;
   if (!name.startsWith('computer_')) return false;
   return !['snapshot', 'read', 'list', 'status', 'screenshot'].some((word) =>
     name.includes(word),

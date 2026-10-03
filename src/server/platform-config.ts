@@ -26,6 +26,9 @@ export interface PlatformConfig extends WebConfig {
   liveAvatarAvatarId?: string;
   liveAvatarElevenLabsSecretId?: string;
   liveAvatarSandbox?: boolean;
+  gmailClientId?: string;
+  gmailClientSecret?: string;
+  gmailRefreshToken?: string;
   slackChannel?: string;
   slackTeam?: string;
   slackUsers: string[];
@@ -72,6 +75,11 @@ export function setupStatus(
     model: !!(config.apiKey && config.model),
     judge: !!config.judgeKey,
     browser: !!(config.browserUrl && config.browserSecret),
+    mail: !!(
+      config.gmailClientId &&
+      config.gmailClientSecret &&
+      config.gmailRefreshToken
+    ),
     voice: voiceConfigured && !missing.length,
     avatar: avatarConfigured,
     voiceProvider: config.voiceProvider ?? 'openai',
