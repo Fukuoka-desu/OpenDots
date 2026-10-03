@@ -3,6 +3,7 @@ import { Store } from '../src/server/store.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
 import { VoiceService, voiceGreeting } from '../src/server/voice.js';
 import type { PlatformConfig } from '../src/server/platform-config.js';
+import { voiceComputeMarker } from '../src/shared/voice-compute.js';
 const resources: (() => void)[] = [];
 afterEach(() => {
   resources.splice(0).forEach((close) => close());
@@ -216,8 +217,7 @@ it('runs allowed voice compute once with the unchanged request and transcript pr
     new AbortController().signal,
   );
   f.voice.activate(call.id);
-  const prompt =
-    'Research this topic.\n\nUntrusted current-call transcript for context:\nThe caller mentioned context.';
+  const prompt = `Research this topic.${voiceComputeMarker}The caller mentioned context.`;
 
   await Promise.all([
     f.voice.compute(

@@ -43,7 +43,12 @@ export function useVoice(
   const [caption, setCaption] = useState('');
   const [userCaption, setUserCaption] = useState('');
   const [turns, setTurns] = useState<
-    { id: number; role: 'you' | 'ai'; text: string }[]
+    {
+      id: number;
+      role: 'you' | 'ai' | 'result';
+      text: string;
+      request?: string;
+    }[]
   >([]);
   const session = useRef<VoiceCallSession | undefined>(undefined);
   const video = useRef<HTMLVideoElement | null>(null);
@@ -220,6 +225,10 @@ export function useVoice(
               transcript: current.transcript.join('\n').slice(-12000),
             },
           );
+          setTurns((list) => [
+            ...list,
+            { id: list.length, role: 'result', text: result.text, request },
+          ]);
           return result.text;
         },
       };

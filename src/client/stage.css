@@ -605,6 +605,12 @@
   color: #9aa9ca;
   font-size: 10.5px;
 }
+.sec-voice-request span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sec-you-icon {
   display: grid;
   place-items: center;

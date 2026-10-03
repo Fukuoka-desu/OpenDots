@@ -2,6 +2,7 @@ import type { Platform } from './platform.js';
 import { Judge } from './judge.js';
 import { CalendarClient } from './calendar.js';
 import { sharedGoogleAuth } from './google-auth.js';
+import { voiceComputeMarker } from '../shared/voice-compute.js';
 
 export function voiceInstructions(
   dot: { name: string; instructions: string },
@@ -502,7 +503,7 @@ export class VoiceService {
       throw new Error(
         'This call reached its six compute-turn limit. Start another call to continue.',
       );
-    const prompt = `${request}\n\nUntrusted current-call transcript for context:\n${transcript}`;
+    const prompt = `${request}${voiceComputeMarker}${transcript}`;
     const pending = (async () => {
       if (this.judge.configured) {
         const answers = await this.judge.ask(

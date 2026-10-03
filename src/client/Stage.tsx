@@ -41,7 +41,7 @@ import {
 } from 'lucide-react';
 import { api, authHeaders } from './api';
 import type { AudioLevels, LiveDotPhase } from './LiveDot';
-import { isInternalVoiceReceipt } from './ChatTranscript';
+import { AssistantMarkdown, isInternalVoiceReceipt } from './ChatTranscript';
 import { useVoice } from './useVoice';
 import { startChromaKey } from './chromaKey';
 import { VoiceWave } from './VoiceWave';
@@ -58,6 +58,7 @@ import type {
   SetupStatus,
   WorkspaceState,
 } from '../shared/types';
+import { voiceComputeRequest } from '../shared/voice-compute';
 import './stage.css';
 
 const dotKey = 'opendots-stage-dot';
@@ -537,6 +538,31 @@ function StageRoom({
           ((typeof item.content === 'string' && !!item.content.trim()) ||
             !!item.toolCalls?.length))),
   );
+  const completedVoiceRequests = new Set(
+    voice.turns.flatMap((turn) =>
+      turn.role === 'result' && turn.request !== undefined
+        ? [turn.request.trim()]
+        : [],
+    ),
+  );
+  const hiddenVoiceComputeMessages = new Set<string>();
+  let hideVoiceComputeMessages = false;
+  for (const item of agent.messages) {
+    if (item.role === 'user') {
+      const request =
+        typeof item.content === 'string'
+          ? voiceComputeRequest(item.content)
+          : undefined;
+      hideVoiceComputeMessages =
+        request !== undefined && completedVoiceRequests.has(request);
+      if (hideVoiceComputeMessages) hiddenVoiceComputeMessages.add(item.id);
+    } else if (hideVoiceComputeMessages) {
+      hiddenVoiceComputeMessages.add(item.id);
+    }
+  }
+  const visibleLines = lines.filter(
+    (item) => !hiddenVoiceComputeMessages.has(item.id),
+  );
   const live = voice.status === 'active';
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'end' });
@@ -848,8 +874,26 @@ function StageRoom({
               中央のボタンで声で話すか、下の欄に文字で話しかけてください。
             </p>
           )}
-          {lines.map((item) => {
+          {visibleLines.map((item) => {
             if (item.role === 'user') {
+              const computeRequest =
+                typeof item.content === 'string'
+                  ? voiceComputeRequest(item.content)
+                  : undefined;
+              if (computeRequest !== undefined) {
+                const requestChars = Array.from(computeRequest);
+                const displayRequest =
+                  requestChars.length > 60
+                    ? `${requestChars.slice(0, 60).join('')}…`
+                    : computeRequest;
+                return (
+                  <div key={item.id} className="sec-report sec-voice-request">
+                    <Mic size={14} />
+                    <span>音声での依頼：{displayRequest}</span>
+                    <time>{seenAt(item.id)}</time>
+                  </div>
+                );
+              }
               const reportLabel =
                 typeof item.content === 'string'
                   ? reportMarker.exec(item.content)?.[1]
@@ -943,6 +987,18 @@ function StageRoom({
                   あなた（音声）
                 </p>
                 <p className="sec-bubble">{turn.text}</p>
+              </div>
+            ) : turn.role === 'result' ? (
+              <div key={`turn-${turn.id}`} className="sec-msg ai voice">
+                <span className="sec-ai-icon">
+                  <AudioLines size={16} />
+                </span>
+                <div>
+                  <p className="sec-meta">トレタン</p>
+                  <div className="sec-bubble">
+                    <AssistantMarkdown content={turn.text} />
+                  </div>
+                </div>
               </div>
             ) : (
               <div key={`turn-${turn.id}`} className="sec-msg ai voice">
