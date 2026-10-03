@@ -36,6 +36,7 @@ import {
   User,
   Users,
   Wrench,
+  Wallet,
 } from 'lucide-react';
 import { api, authHeaders } from './api';
 import type { AudioLevels, LiveDotPhase } from './LiveDot';
@@ -171,7 +172,7 @@ const demos: Demo[] = [
   {
     label: '予定を追加',
     prompt:
-      '来週月曜の15時から30分、「AI秘書デモ振り返り」という予定をカレンダーに入れて。',
+      '来週月曜の15時から30分、「トレタンデモ振り返り」という予定をカレンダーに入れて。',
     needs: 'mail',
   },
 ];
@@ -249,7 +250,7 @@ export function Stage() {
       setThread(
         await api<Conversation>('/conversations', 'POST', {
           dotId: target.id,
-          title: 'AI秘書との会話',
+          title: 'トレタンとの会話',
         }),
       );
     } catch (e) {
@@ -280,7 +281,7 @@ export function Stage() {
               ? `セットアップが必要です: ${state.setup.missing.join(', ')}`
               : state && !state.dots.length
                 ? 'Dot がまだありません。ワークスペースで作成してください。'
-                : 'AI秘書を呼んでいます…')}
+                : 'トレタンを呼んでいます…')}
         </p>
         <a href="/">ワークスペースを開く</a>
       </div>
@@ -310,6 +311,7 @@ function Rail() {
     [<Users key="r" />, 'CRM'],
     [<Globe key="b" />, 'ブラウザ'],
     [<BookOpen key="k" />, 'ナレッジ'],
+    [<Wallet key="u" />, '料金'],
   ];
   return (
     <nav className="sec-rail" aria-label="メニュー">
@@ -321,7 +323,7 @@ function Rail() {
         <a
           key={label}
           className={`sec-rail-item ${i === 0 ? 'active' : ''}`}
-          href={i === 0 ? '/?stage' : '/'}
+          href={i === 0 ? '/?stage' : label === '料金' ? '/?usage' : '/'}
           aria-current={i === 0 ? 'page' : undefined}
         >
           {icon}
@@ -494,7 +496,7 @@ function StageRoom({
     <div ref={root} className={`sec phase-${phase}`}>
       <Rail />
       <header className="sec-top">
-        <span>考え、動き、つながる —— あなたのAI秘書</span>
+        <span>考え、動き、つながる —— あなたの相棒トレタン</span>
         <span className="sec-top-tools">
           <select
             aria-label="話す Dot"
@@ -516,7 +518,7 @@ function StageRoom({
 
       <section
         className={`sec-stage ${voice.avatarReady ? 'avatar-on' : ''}`}
-        aria-label="AI秘書"
+        aria-label="トレタン"
       >
         <VoiceWave phase={phase} getLevels={voice.getLevels} />
         <video
@@ -534,12 +536,12 @@ function StageRoom({
         <div className="sec-badge">
           <p>
             <span className={`sec-live-dot ${onCall ? 'on' : ''}`} />
-            <strong>AI秘書</strong>
+            <strong>トレタン</strong>
             <em className={onCall ? 'on' : ''}>
               {onCall ? 'LIVE' : 'STANDBY'}
             </em>
           </p>
-          <small>Jevが判断する、あなただけのAI秘書</small>
+          <small>Jevが判断する、あなただけの相棒</small>
         </div>
         <div className="sec-actions">
           <h3>実行中のアクション</h3>
@@ -617,7 +619,7 @@ function StageRoom({
             <AudioLines />
           </span>
           <span>
-            <h2>AI秘書</h2>
+            <h2>トレタン</h2>
             <small>Jevが判断 / Voice Agent</small>
           </span>
           <dl className="sec-stack">
@@ -663,7 +665,7 @@ function StageRoom({
                 </span>
                 <div>
                   <p className="sec-meta">
-                    AI秘書 <time>{seenAt(item.id)}</time>
+                    トレタン <time>{seenAt(item.id)}</time>
                   </p>
                   {typeof item.content === 'string' && item.content.trim() && (
                     <p className="sec-bubble">{item.content}</p>
@@ -732,7 +734,7 @@ function StageRoom({
                   <AudioLines size={16} />
                 </span>
                 <div>
-                  <p className="sec-meta">AI秘書（音声）</p>
+                  <p className="sec-meta">トレタン（音声）</p>
                   <p className="sec-bubble">{turn.text}</p>
                 </div>
               </div>
