@@ -21,7 +21,7 @@ export type VoiceCallResponse =
       provider: 'elevenlabs';
       signedUrl: string;
       overrides: {
-        agent: { prompt: { prompt: string } };
+        agent: { prompt: { prompt: string }; firstMessage: string };
         tts?: { voiceId: string };
       };
     };

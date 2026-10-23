@@ -77,6 +77,8 @@ Enable the Gmail API in Google Cloud, configure the OAuth consent screen, and cr
 
 Run `npm run setup:gmail` to print the consent URL, open it, and approve access. Then pass the full redirect URL or its code to `npm run setup:gmail -- '<redirect URL or code>'`. The script stores the refresh token in `.env` and prints only the Gmail account address. The app uses read-only and compose scopes: Gmail tools can search and read messages and create drafts, but never send a newly created draft immediately. The Dot must show recipients, subject, and the full body, then wait for explicit approval in a new message before sending.
 
+Google Calendar tools use the same OAuth client and refresh token to list and create events on the owner's primary calendar. The consent request also includes the `calendar.events` scope; after adding this scope, rerun both `npm run setup:gmail` steps and replace the stored refresh token so Google grants Calendar access.
+
 ## Persistent Dot computers
 
 For a separate browser, persistent files, and optional shell for each specialist, follow [Computer setup](COMPUTERS.md). This uses pinned OpenBot computer/supervisor services and per-Dot permissions. Parallel research tools remain available alongside configured computer tools. With the browser provider selected, Dots use their computer tools in place of the read-only public-page tool; enable each Dot's required capabilities before use.

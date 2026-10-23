@@ -5,7 +5,7 @@ import {
   upsertEnvValue,
 } from '../scripts/setup-gmail.js';
 
-it('builds the Gmail OAuth consent URL with offline read and compose scopes', () => {
+it('builds the Gmail OAuth consent URL with offline Gmail and Calendar scopes', () => {
   const url = new URL(buildConsentUrl('desktop-client-id'));
   expect(url.origin + url.pathname).toBe(
     'https://accounts.google.com/o/oauth2/v2/auth',
@@ -15,7 +15,7 @@ it('builds the Gmail OAuth consent URL with offline read and compose scopes', ()
     redirect_uri: 'http://127.0.0.1:53682/',
     response_type: 'code',
     scope:
-      'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose',
+      'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/calendar.events',
     access_type: 'offline',
     prompt: 'consent',
   });

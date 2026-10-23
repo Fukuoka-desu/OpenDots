@@ -2,6 +2,7 @@ import { openPageLink } from './page-navigation';
 import { Fragment, type ReactNode } from 'react';
 import { PhoneOff } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { AssistantMessage, Message } from '@ag-ui/core';
 import type { CallReceipt } from '../shared/types';
 import { voiceReceiptMessagePrefix } from '../shared/voice-receipt';
@@ -15,6 +16,33 @@ export function isInternalVoiceReceipt(message: Message): boolean {
         typeof metadata === 'object' &&
         'opendotsSource' in metadata &&
         metadata.opendotsSource === 'voice_receipt'))
+  );
+}
+export function AssistantMarkdown({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        img: ({ alt }) => <span>{alt}</span>,
+        a: ({ href, children }) => (
+          <a
+            onClick={(event) => {
+              if (href?.startsWith('/#/spaces/')) {
+                event.preventDefault();
+                openPageLink(href);
+              }
+            }}
+            href={href}
+            target={href?.startsWith('/#/spaces/') ? undefined : '_blank'}
+            rel="noreferrer"
+          >
+            {children}
+          </a>
+        ),
+      }}
+    >
+      {content}
+    </ReactMarkdown>
   );
 }
 function Receipt({ call }: { call: CallReceipt }) {
@@ -55,30 +83,7 @@ export function ChatTranscript({
         <Fragment key={message.id}>
           {typeof message.content === 'string' && message.content.trim() && (
             <div className={`chat-bubble ${message.role}`}>
-              <ReactMarkdown
-                components={{
-                  img: ({ alt }) => <span>{alt}</span>,
-                  a: ({ href, children }) => (
-                    <a
-                      onClick={(event) => {
-                        if (href?.startsWith('/#/spaces/')) {
-                          event.preventDefault();
-                          openPageLink(href);
-                        }
-                      }}
-                      href={href}
-                      target={
-                        href?.startsWith('/#/spaces/') ? undefined : '_blank'
-                      }
-                      rel="noreferrer"
-                    >
-                      {children}
-                    </a>
-                  ),
-                }}
-              >
-                {String(message.content)}
-              </ReactMarkdown>
+              <AssistantMarkdown content={String(message.content)} />
             </div>
           )}
           {message.role === 'assistant' && renderTools?.(message)}
